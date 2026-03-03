@@ -16,6 +16,7 @@ import android.text.Spannable
 import android.text.SpannableString
 import android.text.TextWatcher
 import android.text.style.BackgroundColorSpan
+import android.text.style.ForegroundColorSpan
 import android.util.Base64
 import android.view.Gravity
 import android.view.View
@@ -48,19 +49,23 @@ class MainActivity : AppCompatActivity() {
     private var isPolling = false
     private var isFirstLoad = true
     private val CHANNEL_ID = "communique_chat"
-    
-    // --- Search State Variables ---
+
+    // --- Search State ---
     private var currentSearchQuery = ""
+    private var searchMatchIndices = mutableListOf<Int>() // Stores indices of messages containing the search query
+    private var currentSearchIndex = -1 // Points to the currently focused match
 
     private lateinit var chatMessageContainer: LinearLayout
     private lateinit var chatScrollView: ScrollView
     private lateinit var userCountText: TextView
+    private lateinit var searchPositionText: TextView
+    private lateinit var searchIndicatorLayout: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Request Notification Permissions
+        // Permissions
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
@@ -71,7 +76,7 @@ class MainActivity : AppCompatActivity() {
         val manufacturer = Build.MANUFACTURER.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
         currentDeviceName = "$manufacturer ${Build.MODEL}"
 
-        // --- View Bindings ---
+        // --- Bindings ---
         val loginLayout = findViewById<LinearLayout>(R.id.loginLayout)
         val chatLayout = findViewById<RelativeLayout>(R.id.chatLayout)
         val loginTriggerButton = findViewById<Button>(R.id.loginTriggerButton)
@@ -81,7 +86,7 @@ class MainActivity : AppCompatActivity() {
         val messageInput = findViewById<EditText>(R.id.messageInput)
         val detectedDeviceText = findViewById<TextView>(R.id.detectedDeviceText)
         val gifImageView = findViewById<ImageView>(R.id.loginGif)
-        
+
         // Search Bindings
         userCountText = findViewById(R.id.userCountText)
         val searchIcon = findViewById<ImageView>(R.id.searchIcon)
@@ -89,6 +94,12 @@ class MainActivity : AppCompatActivity() {
         val searchInput = findViewById<EditText>(R.id.searchInput)
         val closeSearchBtn = findViewById<ImageButton>(R.id.closeSearchBtn)
         
+        // Search Navigation Bindings
+        searchIndicatorLayout = findViewById(R.id.searchIndicatorLayout)
+        searchPositionText = findViewById(R.id.searchPositionText)
+        val searchUpBtn = findViewById<ImageButton>(R.id.searchUpBtn)
+        val searchDownBtn = findViewById<ImageButton>(R.id.searchDownBtn)
+
         chatMessageContainer = findViewById(R.id.chatMessageContainer)
         chatScrollView = findViewById(R.id.chatScrollView)
 
@@ -96,7 +107,6 @@ class MainActivity : AppCompatActivity() {
 
         try { Glide.with(this).asGif().load(R.drawable.login).into(gifImageView) } catch (e: Exception) {}
 
-        // --- Login Animations ---
         loginTriggerButton.setOnClickListener {
             loginTriggerButton.animate().alpha(0f).setDuration(300).withEndAction {
                 loginTriggerButton.visibility = View.GONE
@@ -119,34 +129,40 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // --- Search Interactions ---
+        // --- Search Functionality ---
         searchIcon.setOnClickListener {
             if (searchContainer.visibility == View.VISIBLE) {
-                searchContainer.visibility = View.GONE
-                currentSearchQuery = ""
-                searchInput.text.clear()
-                updateChatUI() // Redraw to clear highlights
+                closeSearch(searchContainer, searchInput)
             } else {
                 searchContainer.visibility = View.VISIBLE
                 searchInput.requestFocus()
             }
         }
-        
-        closeSearchBtn.setOnClickListener {
-            searchContainer.visibility = View.GONE
-            currentSearchQuery = ""
-            searchInput.text.clear()
-            updateChatUI() // Redraw to clear highlights
-        }
-        
+
+        closeSearchBtn.setOnClickListener { closeSearch(searchContainer, searchInput) }
+
         searchInput.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: Editable?) {
                 currentSearchQuery = s.toString()
-                applySearchHighlight()
+                executeSearch()
             }
         })
+        
+        searchUpBtn.setOnClickListener {
+            if (searchMatchIndices.isNotEmpty()) {
+                currentSearchIndex = if (currentSearchIndex > 0) currentSearchIndex - 1 else searchMatchIndices.size - 1
+                updateSearchIndicatorAndScroll()
+            }
+        }
+
+        searchDownBtn.setOnClickListener {
+            if (searchMatchIndices.isNotEmpty()) {
+                currentSearchIndex = if (currentSearchIndex < searchMatchIndices.size - 1) currentSearchIndex + 1 else 0
+                updateSearchIndicatorAndScroll()
+            }
+        }
 
         findViewById<View>(R.id.sendButton).setOnClickListener {
             val text = messageInput.text.toString().trim()
@@ -154,7 +170,7 @@ class MainActivity : AppCompatActivity() {
                 messageInput.text.clear()
                 val encryptedText = encryptMessage(text)
                 val newMessage = ChatMessage(currentDeviceName, encryptedText, System.currentTimeMillis())
-                
+
                 chatHistory.add(newMessage)
                 updateChatUI()
                 CoroutineScope(Dispatchers.IO).launch { pushGistUpdate(chatHistory) }
@@ -163,46 +179,57 @@ class MainActivity : AppCompatActivity() {
     }
 
     // --- Search Logic ---
-    private fun applySearchHighlight() {
+    private fun closeSearch(container: LinearLayout, input: EditText) {
+        container.visibility = View.GONE
+        currentSearchQuery = ""
+        input.text.clear()
+        searchMatchIndices.clear()
+        currentSearchIndex = -1
+        searchIndicatorLayout.visibility = View.GONE
+        updateChatUI()
+    }
+
+    private fun executeSearch() {
+        searchMatchIndices.clear()
+        currentSearchIndex = -1
+
         if (currentSearchQuery.isEmpty()) {
-            updateChatUI() 
+            searchIndicatorLayout.visibility = View.GONE
+            updateChatUI()
             return
         }
 
-        var firstMatchFound = false
-
         for ((index, msg) in chatHistory.withIndex()) {
-            val decryptedText = decryptMessage(msg.message)
-            if (decryptedText.contains(currentSearchQuery, ignoreCase = true)) {
-                
-                // Navigate our layout hierarchy to find the TextView containing the message
-                val wrapperLayout = chatMessageContainer.getChildAt(index) as? LinearLayout
-                val bubbleLayout = wrapperLayout?.getChildAt(0) as? LinearLayout
-                
-                for (i in 0 until (bubbleLayout?.childCount ?: 0)) {
-                   val view = bubbleLayout?.getChildAt(i)
-                   if(view is TextView && view.text.toString() == decryptedText) {
-                       val spannable = SpannableString(decryptedText)
-                       val startPos = decryptedText.indexOf(currentSearchQuery, ignoreCase = true)
-                       
-                       // Apply yellow highlight
-                       spannable.setSpan(
-                           BackgroundColorSpan(Color.YELLOW),
-                           startPos,
-                           startPos + currentSearchQuery.length,
-                           Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-                       )
-                       view.text = spannable
-                       
-                       // Automatically scroll to the first match
-                       if(!firstMatchFound) {
-                           chatScrollView.post {
-                               chatScrollView.smoothScrollTo(0, wrapperLayout.top)
-                           }
-                           firstMatchFound = true
-                       }
-                   }
-                }
+            if (decryptMessage(msg.message).contains(currentSearchQuery, ignoreCase = true)) {
+                searchMatchIndices.add(index)
+            }
+        }
+
+        if (searchMatchIndices.isNotEmpty()) {
+            searchIndicatorLayout.visibility = View.VISIBLE
+            currentSearchIndex = searchMatchIndices.size - 1 // Default focus to the most recent match (bottom)
+        } else {
+            searchIndicatorLayout.visibility = View.GONE
+        }
+        
+        updateSearchIndicatorAndScroll()
+    }
+
+    private fun updateSearchIndicatorAndScroll() {
+        if (searchMatchIndices.isEmpty()) return
+        
+        // Update the "(current / total)" text
+        searchPositionText.text = "(${currentSearchIndex + 1}/${searchMatchIndices.size})"
+        
+        // Redraw UI to apply highlights (current focus gets different color)
+        updateChatUI()
+        
+        // Scroll to the currently focused match
+        val targetGlobalIndex = searchMatchIndices[currentSearchIndex]
+        val wrapperLayout = chatMessageContainer.getChildAt(targetGlobalIndex)
+        if (wrapperLayout != null) {
+            chatScrollView.post {
+                chatScrollView.smoothScrollTo(0, wrapperLayout.top)
             }
         }
     }
@@ -228,7 +255,7 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) { "🔒 [Decryption Failed]" }
     }
 
-    // --- NOTIFICATIONS & NETWORK ---
+    // --- NETWORK & SYSTEM ---
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(CHANNEL_ID, "Communique Chat", NotificationManager.IMPORTANCE_HIGH)
@@ -257,8 +284,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun playNotificationSound() {
         try {
-            val notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            RingtoneManager.getRingtone(applicationContext, notification).play()
+            RingtoneManager.getRingtone(applicationContext, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)).play()
         } catch (e: Exception) {}
     }
 
@@ -266,7 +292,7 @@ class MainActivity : AppCompatActivity() {
         CoroutineScope(Dispatchers.IO).launch {
             while (isPolling) {
                 fetchGist()
-                delay(5000)
+                delay(2000)
             }
         }
     }
@@ -287,14 +313,14 @@ class MainActivity : AppCompatActivity() {
                     if (fetchedHistory.size > chatHistory.size) {
                         val lastMessage = fetchedHistory.last()
                         val isMe = lastMessage.device == currentDeviceName
-                        
+
                         chatHistory.clear()
                         chatHistory.addAll(fetchedHistory)
-                        
-                        CoroutineScope(Dispatchers.Main).launch { 
+
+                        CoroutineScope(Dispatchers.Main).launch {
                             updateChatUI()
-                            updateUserCount() // Refresh the user count
-                            
+                            updateUserCount()
+
                             if (!isFirstLoad && !isMe) {
                                 playNotificationSound()
                                 showNotification(lastMessage.device, decryptMessage(lastMessage.message))
@@ -324,17 +350,17 @@ class MainActivity : AppCompatActivity() {
         try { httpClient.newCall(request).execute().close() } catch (e: Exception) {}
     }
 
-    // --- UI HELPERS ---
     private fun updateUserCount() {
         val uniqueDevices = chatHistory.map { it.device }.distinct().size
         userCountText.text = "$uniqueDevices users"
     }
 
+    // --- UI DRAWING ---
     private fun updateChatUI() {
         chatMessageContainer.removeAllViews()
         val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
 
-        for (msg in chatHistory) {
+        for ((index, msg) in chatHistory.withIndex()) {
             val isMe = msg.device == currentDeviceName
             val bubbleShape = GradientDrawable().apply {
                 cornerRadius = 48f
@@ -358,11 +384,29 @@ class MainActivity : AppCompatActivity() {
                 })
             }
 
-            bubbleLayout.addView(TextView(this).apply {
-                text = decryptMessage(msg.message)
+            val decryptedText = decryptMessage(msg.message)
+            val messageView = TextView(this).apply {
                 textSize = 16f
                 setTextColor(Color.BLACK)
-            })
+                
+                // Handle Search Highlighting
+                if (currentSearchQuery.isNotEmpty() && decryptedText.contains(currentSearchQuery, ignoreCase = true)) {
+                    val spannable = SpannableString(decryptedText)
+                    val startPos = decryptedText.indexOf(currentSearchQuery, ignoreCase = true)
+                    
+                    // Highlight color depends on if it's the currently focused match
+                    val isFocusedMatch = searchMatchIndices.isNotEmpty() && currentSearchIndex >= 0 && searchMatchIndices[currentSearchIndex] == index
+                    val highlightColor = if (isFocusedMatch) Color.parseColor("#FF9800") else Color.YELLOW // Orange for focus, yellow for others
+                    val textColor = if (isFocusedMatch) Color.WHITE else Color.BLACK
+
+                    spannable.setSpan(BackgroundColorSpan(highlightColor), startPos, startPos + currentSearchQuery.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    spannable.setSpan(ForegroundColorSpan(textColor), startPos, startPos + currentSearchQuery.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    text = spannable
+                } else {
+                    text = decryptedText
+                }
+            }
+            bubbleLayout.addView(messageView)
 
             bubbleLayout.addView(TextView(this).apply {
                 text = timeFormat.format(Date(msg.timestamp))
@@ -383,11 +427,10 @@ class MainActivity : AppCompatActivity() {
             wrapper.addView(bubbleLayout)
             chatMessageContainer.addView(wrapper)
         }
-        
-        if(currentSearchQuery.isEmpty()) {
+
+        // Only auto-scroll to bottom if we are NOT actively searching
+        if (currentSearchQuery.isEmpty() && chatMessageContainer.childCount > 0) {
             chatScrollView.post { chatScrollView.smoothScrollTo(0, chatMessageContainer.bottom) }
-        } else {
-            applySearchHighlight()
         }
     }
 }
