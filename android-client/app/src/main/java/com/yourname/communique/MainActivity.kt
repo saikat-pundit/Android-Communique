@@ -75,6 +75,8 @@ class MainActivity : AppCompatActivity() {
 
     // Drive Upload Token cache
     private var googleDriveAccessToken: String? = null
+    // Hardcoded target ID per specification
+    private val TARGET_DRIVE_FOLDER_ID = "1RjvnpZ6Nhwf22-7lrTvQxU_0wn-HM_1e"
 
     // Activity Result Launcher for Media Selection
     private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -144,7 +146,7 @@ class MainActivity : AppCompatActivity() {
                     chatLayout.animate().alpha(1f).setDuration(600).start()
                     isPolling = true
                     startPollingGist()
-                    // Initialize Drive Auth in background
+                    // Initialize Drive Auth in background securely
                     CoroutineScope(Dispatchers.IO).launch { fetchDriveAccessToken() }
                 }.start()
             } else {
@@ -316,9 +318,7 @@ class MainActivity : AppCompatActivity() {
 
         CoroutineScope(Dispatchers.Main).launch { Toast.makeText(this@MainActivity, "Uploading $fileName...", Toast.LENGTH_SHORT).show() }
         
-        // Use the explicit Drive Folder ID
-        val TARGET_DRIVE_FOLDER_ID = "1RjvnpZ6Nhwf22-7lrTvQxU_0wn-HM_1e"
-        
+        // Push Directly to the provided Target Folder ID
         val metadata = JSONObject().apply {
             put("name", fileName)
             put("parents", org.json.JSONArray().put(TARGET_DRIVE_FOLDER_ID))
