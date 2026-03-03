@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#ECE5DD">
+    android:background="#FFFFFF">
 
     <LinearLayout
         android:id="@+id/loginLayout"
@@ -13,11 +14,21 @@
         android:gravity="center"
         android:visibility="visible">
 
+        <com.google.android.material.imageview.ShapeableImageView
+            android:id="@+id/loginGif"
+            android:layout_width="120dp"
+            android:layout_height="120dp"
+            android:scaleType="centerCrop"
+            android:layout_marginBottom="24dp"
+            app:shapeAppearanceOverlay="@style/CircleStyle"
+            android:elevation="8dp"/>
+
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Communiqué Secure"
-            android:textSize="32sp"
+            android:text="Communiqué"
+            android:textColor="#000000"
+            android:textSize="36sp"
             android:textStyle="bold"
             android:layout_marginBottom="8dp"/>
             
@@ -25,15 +36,43 @@
             android:id="@+id/detectedDeviceText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Detecting device..."
-            android:textColor="#888888"
-            android:layout_marginBottom="32dp"/>
+            android:text="Device Name: Loading..."
+            android:textColor="#666666"
+            android:textSize="16sp"
+            android:layout_marginBottom="48dp"/>
 
         <Button
-            android:id="@+id/loginButton"
+            android:id="@+id/loginTriggerButton"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:text="Login"
+            android:textSize="18sp"
+            android:backgroundTint="#000000" />
+
+        <LinearLayout
+            android:id="@+id/pinContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Connect to Secure Chat" />
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:alpha="0">
+            
+            <EditText
+                android:id="@+id/pinInput"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:hint="Enter App Lock PIN"
+                android:inputType="numberPassword"
+                android:gravity="center"
+                android:layout_marginBottom="16dp"/>
+
+            <Button
+                android:id="@+id/unlockButton"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:text="Unlock"
+                android:backgroundTint="#007BFF" />
+        </LinearLayout>
     </LinearLayout>
 
     <LinearLayout
@@ -41,14 +80,18 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        android:visibility="gone">
+        android:background="@drawable/wallpaper"
+        android:visibility="gone"
+        android:alpha="0">
 
         <ScrollView
             android:id="@+id/chatScrollView"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:padding="12dp">
+            android:padding="12dp"
+            android:clipToPadding="false"
+            android:paddingBottom="80dp">
             
             <LinearLayout
                 android:id="@+id/chatMessageContainer"
@@ -62,23 +105,30 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:padding="8dp"
-            android:background="#FFFFFF"
-            android:elevation="8dp">
+            android:background="#EFF2F5"
+            android:gravity="center_vertical"
+            android:elevation="16dp">
 
             <EditText
                 android:id="@+id/messageInput"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="Type a secure message..."
+                android:hint="Type a message..."
                 android:background="@android:color/transparent"
-                android:padding="12dp"/>
+                android:padding="16dp"
+                android:textSize="16sp"/>
 
-            <Button
+            <com.google.android.material.floatingactionbutton.FloatingActionButton
                 android:id="@+id/sendButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Send" />
+                android:src="@drawable/ic_send"
+                app:backgroundTint="#007BFF"
+                app:tint="#FFFFFF"
+                app:fabSize="mini"
+                android:layout_marginStart="8dp"/>
         </LinearLayout>
     </LinearLayout>
+
 </FrameLayout>
