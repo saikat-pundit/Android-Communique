@@ -590,7 +590,9 @@ class MainActivity : AppCompatActivity() {
                     spannable.setSpan(BackgroundColorSpan(highlightColor), startPos, startPos + currentSearchQuery.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
                     spannable.setSpan(ForegroundColorSpan(textColor), startPos, startPos + currentSearchQuery.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
                     text = spannable
-                } else text = decryptedText
+                } else {
+                    text = decryptedText
+                }
             }
             bubbleLayout.addView(messageView)
 
