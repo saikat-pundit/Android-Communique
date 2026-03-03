@@ -14,18 +14,12 @@
         android:gravity="center"
         android:visibility="visible">
 
-        <com.google.android.material.imageview.ShapeableImageView
+        <ImageView
             android:id="@+id/loginGif"
-            android:layout_width="160dp"
-            android:layout_height="160dp"
-            android:scaleType="centerCrop"
-            android:layout_marginBottom="24dp"
-            android:padding="6dp"
-            android:background="#FAFAFA"
-            app:strokeWidth="3dp"
-            app:strokeColor="#E0E0E0"
-            app:shapeAppearanceOverlay="@style/CircleStyle"
-            android:elevation="8dp"/>
+            android:layout_width="match_parent"
+            android:layout_height="250dp"
+            android:scaleType="fitCenter"
+            android:layout_marginBottom="24dp" />
 
         <TextView
             android:layout_width="wrap_content"
