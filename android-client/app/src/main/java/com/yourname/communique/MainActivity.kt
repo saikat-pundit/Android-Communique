@@ -146,8 +146,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         searchIcon.setOnClickListener {
-            if (searchContainer.visibility == View.VISIBLE) closeSearch(searchContainer, searchInput)
-            else { searchContainer.visibility = View.VISIBLE; searchInput.requestFocus() }
+            if (searchContainer.visibility == View.VISIBLE) {
+                closeSearch(searchContainer, searchInput)
+            } else {
+                searchContainer.visibility = View.VISIBLE
+                searchInput.requestFocus()
+            }
         }
 
         closeSearchBtn.setOnClickListener { closeSearch(searchContainer, searchInput) }
@@ -163,14 +167,22 @@ class MainActivity : AppCompatActivity() {
         
         searchUpBtn.setOnClickListener {
             if (searchMatchIndices.isNotEmpty()) {
-                currentSearchIndex = if (currentSearchIndex > 0) currentSearchIndex - 1 else searchMatchIndices.size - 1
+                currentSearchIndex = if (currentSearchIndex > 0) {
+                    currentSearchIndex - 1
+                } else {
+                    searchMatchIndices.size - 1
+                }
                 updateSearchIndicatorAndScroll()
             }
         }
 
         searchDownBtn.setOnClickListener {
             if (searchMatchIndices.isNotEmpty()) {
-                currentSearchIndex = if (currentSearchIndex < searchMatchIndices.size - 1) currentSearchIndex + 1 else 0
+                currentSearchIndex = if (currentSearchIndex < searchMatchIndices.size - 1) {
+                    currentSearchIndex + 1
+                } else {
+                    0
+                }
                 updateSearchIndicatorAndScroll()
             }
         }
@@ -373,7 +385,9 @@ class MainActivity : AppCompatActivity() {
         if (searchMatchIndices.isNotEmpty()) {
             searchIndicatorLayout.visibility = View.VISIBLE
             currentSearchIndex = searchMatchIndices.size - 1
-        } else searchIndicatorLayout.visibility = View.GONE
+        } else {
+            searchIndicatorLayout.visibility = View.GONE
+        }
         
         updateSearchIndicatorAndScroll()
     }
@@ -384,7 +398,9 @@ class MainActivity : AppCompatActivity() {
         updateChatUI()
         val targetGlobalIndex = searchMatchIndices[currentSearchIndex]
         val wrapperLayout = chatMessageContainer.getChildAt(targetGlobalIndex)
-        if (wrapperLayout != null) chatScrollView.post { chatScrollView.smoothScrollTo(0, wrapperLayout.top) }
+        if (wrapperLayout != null) {
+            chatScrollView.post { chatScrollView.smoothScrollTo(0, wrapperLayout.top) }
+        }
     }
 
     private fun getSecretKey(): SecretKeySpec {
@@ -404,7 +420,9 @@ class MainActivity : AppCompatActivity() {
             val cipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
             cipher.init(Cipher.DECRYPT_MODE, getSecretKey())
             String(cipher.doFinal(Base64.decode(encryptedMessage, Base64.DEFAULT)), Charsets.UTF_8)
-        } catch (e: Exception) { "ðŸ”’ [Decryption Failed]" }
+        } catch (e: Exception) {
+            "🔒 [Decryption Failed]"
+        }
     }
 
     private fun createNotificationChannel() {
@@ -427,15 +445,24 @@ class MainActivity : AppCompatActivity() {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
                 notificationManager.notify(System.currentTimeMillis().toInt(), builder.build())
             }
-        } else notificationManager.notify(System.currentTimeMillis().toInt(), builder.build())
+        } else {
+            notificationManager.notify(System.currentTimeMillis().toInt(), builder.build())
+        }
     }
 
     private fun playNotificationSound() {
-        try { RingtoneManager.getRingtone(applicationContext, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)).play() } catch (e: Exception) {}
+        try {
+            RingtoneManager.getRingtone(applicationContext, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)).play()
+        } catch (e: Exception) {}
     }
 
     private fun startPollingGist() {
-        CoroutineScope(Dispatchers.IO).launch { while (isPolling) { fetchGist(); delay(5000) } }
+        CoroutineScope(Dispatchers.IO).launch {
+            while (isPolling) {
+                fetchGist()
+                delay(5000)
+            }
+        }
     }
 
     private fun fetchGist() {
@@ -478,21 +505,27 @@ class MainActivity : AppCompatActivity() {
 
     private fun pushGistUpdate(history: List<ChatMessage>) {
         val payload = JSONObject().apply {
-            put("files", JSONObject().apply { put("chat_ledger.json", JSONObject().apply { put("content", gson.toJson(history)) }) })
+            put("files", JSONObject().apply {
+                put("chat_ledger.json", JSONObject().apply {
+                    put("content", gson.toJson(history))
+                })
+            })
         }
         val request = Request.Builder()
             .url("https://api.github.com/gists/${BuildConfig.CHAT_GIST_ID}")
             .addHeader("Authorization", "Bearer ${BuildConfig.GIST_TOKEN}")
             .patch(payload.toString().toRequestBody("application/json".toMediaType()))
             .build()
-        try { httpClient.newCall(request).execute().close() } catch (e: Exception) {}
+        try {
+            httpClient.newCall(request).execute().close()
+        } catch (e: Exception) {}
     }
 
     private fun updateUserCount() {
         userCountText.text = "${chatHistory.map { it.device }.distinct().size} users"
     }
 
-        private fun updateChatUI() {
+    private fun updateChatUI() {
         chatMessageContainer.removeAllViews()
         val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
 
@@ -500,7 +533,11 @@ class MainActivity : AppCompatActivity() {
             val isMe = msg.device == currentDeviceName
             val bubbleShape = GradientDrawable().apply {
                 cornerRadius = 48f
-                setColor(if (isMe) Color.parseColor("#DCF8C6") else Color.parseColor("#FFFFFF"))
+                if (isMe) {
+                    setColor(Color.parseColor("#DCF8C6"))
+                } else {
+                    setColor(Color.parseColor("#FFFFFF"))
+                }
             }
 
             val bubbleLayout = LinearLayout(this).apply {
@@ -536,7 +573,11 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 val attachmentText = TextView(this).apply {
-                    text = if (msg.fileType.startsWith("image/")) "Image Attachment" else "Document Attachment"
+                    if (msg.fileType?.startsWith("image/") == true) {
+                        text = "Image Attachment"
+                    } else {
+                        text = "Document Attachment"
+                    }
                     textSize = 14f
                     setTypeface(null, Typeface.BOLD)
                     setTextColor(Color.parseColor("#075E54"))
@@ -559,13 +600,22 @@ class MainActivity : AppCompatActivity() {
                 setTextColor(Color.BLACK)
             }
 
-            // Fixed if expression
             if (currentSearchQuery.isNotEmpty() && decryptedText.contains(currentSearchQuery, ignoreCase = true)) {
                 val spannable = SpannableString(decryptedText)
                 val startPos = decryptedText.indexOf(currentSearchQuery, ignoreCase = true)
                 val isFocusedMatch = searchMatchIndices.isNotEmpty() && currentSearchIndex >= 0 && searchMatchIndices[currentSearchIndex] == index
-                val highlightColor = if (isFocusedMatch) Color.parseColor("#FF9800") else Color.YELLOW
-                val textColor = if (isFocusedMatch) Color.WHITE else Color.BLACK
+                
+                val highlightColor = if (isFocusedMatch) {
+                    Color.parseColor("#FF9800")
+                } else {
+                    Color.YELLOW
+                }
+                
+                val textColor = if (isFocusedMatch) {
+                    Color.WHITE
+                } else {
+                    Color.BLACK
+                }
 
                 spannable.setSpan(BackgroundColorSpan(highlightColor), startPos, startPos + currentSearchQuery.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
                 spannable.setSpan(ForegroundColorSpan(textColor), startPos, startPos + currentSearchQuery.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
@@ -587,8 +637,13 @@ class MainActivity : AppCompatActivity() {
 
             val wrapper = LinearLayout(this).apply {
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 12, 0, 12) }
-                gravity = if (isMe) Gravity.END else Gravity.START
-                setPadding(if (isMe) 150 else 0, 0, if (isMe) 0 else 150, 0)
+                if (isMe) {
+                    gravity = Gravity.END
+                    setPadding(150, 0, 0, 0)
+                } else {
+                    gravity = Gravity.START
+                    setPadding(0, 0, 150, 0)
+                }
             }
             wrapper.addView(bubbleLayout)
             chatMessageContainer.addView(wrapper)
