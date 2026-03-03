@@ -2,13 +2,10 @@ name: Android CI Build
 
 on:
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: ./android-client # Tells GitHub where the gradle wrapper is
 
     steps:
     - name: Checkout Repository
@@ -19,13 +16,15 @@ jobs:
       with:
         java-version: '17'
         distribution: 'temurin'
-        cache: gradle
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
+    # This step replaces the need for the 'gradlew' file!
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
 
+    # Notice we now just use 'gradle' instead of './gradlew'
     - name: Build Debug APK
-      run: ./gradlew assembleDebug
+      run: gradle assembleDebug
+      working-directory: ./android-client
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
