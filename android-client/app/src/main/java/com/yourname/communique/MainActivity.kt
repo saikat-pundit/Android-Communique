@@ -556,7 +556,7 @@ class MainActivity : AppCompatActivity() {
                 bubbleLayout.addView(deviceText)
             }
 
-            if (msg.driveFileId != null && msg.fileType != null) {
+                        if (msg.driveFileId != null && msg.fileType != null) {
                 val decryptedFileId = decryptMessage(msg.driveFileId)
                 
                 val attachmentContainer = LinearLayout(this)
@@ -576,6 +576,7 @@ class MainActivity : AppCompatActivity() {
                 attachmentText.setTypeface(null, Typeface.BOLD)
                 attachmentText.setTextColor(Color.parseColor("#075E54"))
                 
+                // Fixed: Use regular if-else instead of expression
                 if (msg.fileType.startsWith("image/")) {
                     attachmentText.text = "Image Attachment"
                 } else {
