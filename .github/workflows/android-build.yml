@@ -33,10 +33,6 @@ jobs:
       run: gradle assembleDebug
       working-directory: ./android-client
 
-    - name: Build Debug APK
-      run: gradle assembleDebug
-      working-directory: ./android-client
-
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
