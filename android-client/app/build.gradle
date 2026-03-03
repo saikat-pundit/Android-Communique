@@ -3,6 +3,13 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
+// Read the secure properties from the file GitHub Actions creates
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localProperties.load(new FileInputStream(localPropertiesFile))
+}
+
 android {
     namespace 'com.yourname.communique'
     compileSdk 34
@@ -13,6 +20,15 @@ android {
         targetSdk 34
         versionCode 1
         versionName "1.0"
+
+        // Inject the secrets into Kotlin securely
+        buildConfigField "String", "GIST_TOKEN", localProperties.getProperty("GIST_TOKEN", "\"\"")
+        buildConfigField "String", "CHAT_GIST_ID", localProperties.getProperty("CHAT_GIST_ID", "\"\"")
+        buildConfigField "String", "DRIVE_JSON_B64", localProperties.getProperty("DRIVE_JSON_B64", "\"\"")
+    }
+
+    buildFeatures {
+        buildConfig true // This generates the BuildConfig.java class
     }
 
     buildTypes {
@@ -35,4 +51,9 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    
+    // New libraries for networking and JSON parsing
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
 }
