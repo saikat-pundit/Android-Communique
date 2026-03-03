@@ -37,7 +37,7 @@ jobs:
         cp android-client/wallpaper.png android-client/app/src/main/res/drawable/wallpaper.png 2>/dev/null || :
 
     - name: Build Debug APK
-      run: gradle assembleDebug
+      run: gradle assembleDebug --stacktrace
       working-directory: ./android-client
 
     - name: Rename APK
