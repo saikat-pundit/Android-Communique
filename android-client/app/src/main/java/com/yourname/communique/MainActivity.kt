@@ -4,13 +4,18 @@ import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.ImageDecoder
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.text.Editable
 import android.text.Spannable
 import android.text.SpannableString
@@ -21,6 +26,7 @@ import android.util.Base64
 import android.view.Gravity
 import android.view.View
 import android.widget.*
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
@@ -32,13 +38,17 @@ import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.security.KeyFactory
 import java.security.MessageDigest
+import java.security.Signature
+import java.security.spec.PKCS8EncodedKeySpec
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-data class ChatMessage(val device: String, val message: String, val timestamp: Long)
+data class ChatMessage(val device: String, val message: String, val timestamp: Long, val driveFileId: String? = null, val fileType: String? = null)
 
 class MainActivity : AppCompatActivity() {
 
@@ -50,22 +60,36 @@ class MainActivity : AppCompatActivity() {
     private var isFirstLoad = true
     private val CHANNEL_ID = "communique_chat"
 
-    // --- Search State ---
+    // Search State
     private var currentSearchQuery = ""
-    private var searchMatchIndices = mutableListOf<Int>() // Stores indices of messages containing the search query
-    private var currentSearchIndex = -1 // Points to the currently focused match
+    private var searchMatchIndices = mutableListOf<Int>()
+    private var currentSearchIndex = -1
 
+    // View Bindings
     private lateinit var chatMessageContainer: LinearLayout
     private lateinit var chatScrollView: ScrollView
     private lateinit var userCountText: TextView
     private lateinit var searchPositionText: TextView
     private lateinit var searchIndicatorLayout: LinearLayout
+    private lateinit var messageInput: EditText
+
+    // Drive Upload Token cache
+    private var googleDriveAccessToken: String? = null
+
+    // Activity Result Launcher for Media Selection
+    private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let {
+            Toast.makeText(this, "Preparing file for upload...", Toast.LENGTH_SHORT).show()
+            CoroutineScope(Dispatchers.IO).launch {
+                handleFileUpload(it)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Permissions
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
@@ -76,29 +100,26 @@ class MainActivity : AppCompatActivity() {
         val manufacturer = Build.MANUFACTURER.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
         currentDeviceName = "$manufacturer ${Build.MODEL}"
 
-        // --- Bindings ---
         val loginLayout = findViewById<LinearLayout>(R.id.loginLayout)
         val chatLayout = findViewById<RelativeLayout>(R.id.chatLayout)
         val loginTriggerButton = findViewById<Button>(R.id.loginTriggerButton)
         val pinContainer = findViewById<LinearLayout>(R.id.pinContainer)
         val pinInput = findViewById<EditText>(R.id.pinInput)
         val unlockButton = findViewById<Button>(R.id.unlockButton)
-        val messageInput = findViewById<EditText>(R.id.messageInput)
+        messageInput = findViewById<EditText>(R.id.messageInput)
         val detectedDeviceText = findViewById<TextView>(R.id.detectedDeviceText)
         val gifImageView = findViewById<ImageView>(R.id.loginGif)
 
-        // Search Bindings
         userCountText = findViewById(R.id.userCountText)
         val searchIcon = findViewById<ImageView>(R.id.searchIcon)
         val searchContainer = findViewById<LinearLayout>(R.id.searchContainer)
         val searchInput = findViewById<EditText>(R.id.searchInput)
         val closeSearchBtn = findViewById<ImageButton>(R.id.closeSearchBtn)
-        
-        // Search Navigation Bindings
         searchIndicatorLayout = findViewById(R.id.searchIndicatorLayout)
         searchPositionText = findViewById(R.id.searchPositionText)
         val searchUpBtn = findViewById<ImageButton>(R.id.searchUpBtn)
         val searchDownBtn = findViewById<ImageButton>(R.id.searchDownBtn)
+        val attachButton = findViewById<ImageButton>(R.id.attachButton)
 
         chatMessageContainer = findViewById(R.id.chatMessageContainer)
         chatScrollView = findViewById(R.id.chatScrollView)
@@ -123,20 +144,18 @@ class MainActivity : AppCompatActivity() {
                     chatLayout.animate().alpha(1f).setDuration(600).start()
                     isPolling = true
                     startPollingGist()
+                    // Initialize Drive Auth in background
+                    CoroutineScope(Dispatchers.IO).launch { fetchDriveAccessToken() }
                 }.start()
             } else {
                 Toast.makeText(this, "Incorrect App Lock PIN", Toast.LENGTH_SHORT).show()
             }
         }
 
-        // --- Search Functionality ---
+        // Search Handlers
         searchIcon.setOnClickListener {
-            if (searchContainer.visibility == View.VISIBLE) {
-                closeSearch(searchContainer, searchInput)
-            } else {
-                searchContainer.visibility = View.VISIBLE
-                searchInput.requestFocus()
-            }
+            if (searchContainer.visibility == View.VISIBLE) closeSearch(searchContainer, searchInput)
+            else { searchContainer.visibility = View.VISIBLE; searchInput.requestFocus() }
         }
 
         closeSearchBtn.setOnClickListener { closeSearch(searchContainer, searchInput) }
@@ -164,18 +183,185 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Media Attachment
+        attachButton.setOnClickListener {
+            filePickerLauncher.launch("*/*")
+        }
+
+        // Send Text Message
         findViewById<View>(R.id.sendButton).setOnClickListener {
             val text = messageInput.text.toString().trim()
             if (text.isNotEmpty()) {
                 messageInput.text.clear()
-                val encryptedText = encryptMessage(text)
-                val newMessage = ChatMessage(currentDeviceName, encryptedText, System.currentTimeMillis())
-
-                chatHistory.add(newMessage)
-                updateChatUI()
-                CoroutineScope(Dispatchers.IO).launch { pushGistUpdate(chatHistory) }
+                sendMessage(text, null, null)
             }
         }
+    }
+
+    // --- Core Messaging Logic ---
+    private fun sendMessage(rawText: String, driveFileId: String?, fileType: String?) {
+        val encryptedText = encryptMessage(rawText)
+        val encryptedFileId = driveFileId?.let { encryptMessage(it) }
+        
+        val newMessage = ChatMessage(currentDeviceName, encryptedText, System.currentTimeMillis(), encryptedFileId, fileType)
+        chatHistory.add(newMessage)
+        CoroutineScope(Dispatchers.Main).launch { updateChatUI() }
+        CoroutineScope(Dispatchers.IO).launch { pushGistUpdate(chatHistory) }
+    }
+
+    // --- Google Drive Upload Logic ---
+    private suspend fun fetchDriveAccessToken() {
+        try {
+            val b64Json = BuildConfig.DRIVE_JSON_B64
+            if (b64Json.isEmpty()) return
+            
+            val jsonString = String(Base64.decode(b64Json, Base64.DEFAULT), Charsets.UTF_8)
+            val serviceAccount = JSONObject(jsonString)
+            
+            val clientEmail = serviceAccount.getString("client_email")
+            val privateKeyString = serviceAccount.getString("private_key")
+                .replace("-----BEGIN PRIVATE KEY-----\n", "")
+                .replace("-----END PRIVATE KEY-----\n", "")
+                .replace("\n", "")
+
+            // 1. Create JWT Header
+            val header = JSONObject().apply {
+                put("alg", "RS256")
+                put("typ", "JWT")
+            }.toString().let { Base64.encodeToString(it.toByteArray(), Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP) }
+
+            // 2. Create JWT Claim Set
+            val now = System.currentTimeMillis() / 1000
+            val claimSet = JSONObject().apply {
+                put("iss", clientEmail)
+                put("scope", "https://www.googleapis.com/auth/drive.file")
+                put("aud", "https://oauth2.googleapis.com/token")
+                put("exp", now + 3600)
+                put("iat", now)
+            }.toString().let { Base64.encodeToString(it.toByteArray(), Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP) }
+
+            val unsignedJwt = "$header.$claimSet"
+
+            // 3. Sign JWT
+            val keyBytes = Base64.decode(privateKeyString, Base64.DEFAULT)
+            val keySpec = PKCS8EncodedKeySpec(keyBytes)
+            val kf = KeyFactory.getInstance("RSA")
+            val privateKey = kf.generatePrivate(keySpec)
+
+            val signature = Signature.getInstance("SHA256withRSA")
+            signature.initSign(privateKey)
+            signature.update(unsignedJwt.toByteArray(Charsets.UTF_8))
+            val signedBytes = signature.sign()
+            
+            val signatureBase64 = Base64.encodeToString(signedBytes, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
+            val jwt = "$unsignedJwt.$signatureBase64"
+
+            // 4. Exchange JWT for Access Token
+            val formBody = FormBody.Builder()
+                .add("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
+                .add("assertion", jwt)
+                .build()
+
+            val request = Request.Builder()
+                .url("https://oauth2.googleapis.com/token")
+                .post(formBody)
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val respString = response.body?.string()
+                    if (respString != null) {
+                        googleDriveAccessToken = JSONObject(respString).getString("access_token")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private suspend fun handleFileUpload(uri: Uri) {
+        if (googleDriveAccessToken == null) {
+            CoroutineScope(Dispatchers.Main).launch { Toast.makeText(this@MainActivity, "Drive Auth Failed. Cannot upload.", Toast.LENGTH_SHORT).show() }
+            return
+        }
+
+        val contentResolver = applicationContext.contentResolver
+        val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+        
+        var fileName = "attachment"
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (cursor.moveToFirst()) fileName = cursor.getString(nameIndex)
+        }
+
+        var fileBytes = contentResolver.openInputStream(uri)?.readBytes() ?: return
+        var finalMimeType = mimeType
+
+        if (mimeType.startsWith("image/")) {
+            try {
+                val source = ImageDecoder.createSource(contentResolver, uri)
+                val bitmap = ImageDecoder.decodeBitmap(source)
+                val baos = ByteArrayOutputStream()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, 80, baos)
+                } else {
+                    bitmap.compress(Bitmap.CompressFormat.WEBP, 80, baos)
+                }
+                fileBytes = baos.toByteArray()
+                finalMimeType = "image/webp"
+                fileName = "${fileName.substringBeforeLast(".")}.webp"
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+
+        CoroutineScope(Dispatchers.Main).launch { Toast.makeText(this@MainActivity, "Uploading $fileName...", Toast.LENGTH_SHORT).show() }
+        
+        // Use the explicit Drive Folder ID
+        val TARGET_DRIVE_FOLDER_ID = "1RjvnpZ6Nhwf22-7lrTvQxU_0wn-HM_1e"
+        
+        val metadata = JSONObject().apply {
+            put("name", fileName)
+            put("parents", org.json.JSONArray().put(TARGET_DRIVE_FOLDER_ID))
+        }
+
+        val requestBody = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("metadata", null, metadata.toString().toRequestBody("application/json".toMediaType()))
+            .addFormDataPart("file", fileName, fileBytes.toRequestBody(finalMimeType.toMediaType()))
+            .build()
+
+        val request = Request.Builder()
+            .url("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart")
+            .addHeader("Authorization", "Bearer $googleDriveAccessToken")
+            .post(requestBody)
+            .build()
+
+        try {
+            httpClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val respString = response.body?.string()
+                    if (respString != null) {
+                        val fileId = JSONObject(respString).getString("id")
+                        val uiText = messageInput.text.toString().ifEmpty { "Sent an attachment" }
+                        CoroutineScope(Dispatchers.Main).launch { messageInput.text.clear() }
+                        sendMessage(uiText, fileId, finalMimeType)
+                    }
+                } else {
+                    CoroutineScope(Dispatchers.Main).launch { Toast.makeText(this@MainActivity, "Upload Failed", Toast.LENGTH_SHORT).show() }
+                }
+            }
+        } catch (e: Exception) {
+            CoroutineScope(Dispatchers.Main).launch { Toast.makeText(this@MainActivity, "Network Error on Upload", Toast.LENGTH_SHORT).show() }
+        }
+    }
+
+    private fun triggerDownload(fileId: String, fileName: String) {
+        val url = "https://drive.google.com/uc?export=download&id=$fileId"
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            data = Uri.parse(url)
+        }
+        startActivity(intent)
+        Toast.makeText(this, "Opening attachment...", Toast.LENGTH_SHORT).show()
     }
 
     // --- Search Logic ---
@@ -192,7 +378,6 @@ class MainActivity : AppCompatActivity() {
     private fun executeSearch() {
         searchMatchIndices.clear()
         currentSearchIndex = -1
-
         if (currentSearchQuery.isEmpty()) {
             searchIndicatorLayout.visibility = View.GONE
             updateChatUI()
@@ -207,31 +392,19 @@ class MainActivity : AppCompatActivity() {
 
         if (searchMatchIndices.isNotEmpty()) {
             searchIndicatorLayout.visibility = View.VISIBLE
-            currentSearchIndex = searchMatchIndices.size - 1 // Default focus to the most recent match (bottom)
-        } else {
-            searchIndicatorLayout.visibility = View.GONE
-        }
+            currentSearchIndex = searchMatchIndices.size - 1
+        } else searchIndicatorLayout.visibility = View.GONE
         
         updateSearchIndicatorAndScroll()
     }
 
     private fun updateSearchIndicatorAndScroll() {
         if (searchMatchIndices.isEmpty()) return
-        
-        // Update the "(current / total)" text
         searchPositionText.text = "(${currentSearchIndex + 1}/${searchMatchIndices.size})"
-        
-        // Redraw UI to apply highlights (current focus gets different color)
         updateChatUI()
-        
-        // Scroll to the currently focused match
         val targetGlobalIndex = searchMatchIndices[currentSearchIndex]
         val wrapperLayout = chatMessageContainer.getChildAt(targetGlobalIndex)
-        if (wrapperLayout != null) {
-            chatScrollView.post {
-                chatScrollView.smoothScrollTo(0, wrapperLayout.top)
-            }
-        }
+        if (wrapperLayout != null) chatScrollView.post { chatScrollView.smoothScrollTo(0, wrapperLayout.top) }
     }
 
     // --- ENCRYPTION ---
@@ -255,12 +428,11 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) { "🔒 [Decryption Failed]" }
     }
 
-    // --- NETWORK & SYSTEM ---
+    // --- NOTIFICATIONS & NETWORK ---
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(CHANNEL_ID, "Communique Chat", NotificationManager.IMPORTANCE_HIGH)
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.createNotificationChannel(channel)
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
         }
     }
 
@@ -277,24 +449,15 @@ class MainActivity : AppCompatActivity() {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
                 notificationManager.notify(System.currentTimeMillis().toInt(), builder.build())
             }
-        } else {
-            notificationManager.notify(System.currentTimeMillis().toInt(), builder.build())
-        }
+        } else notificationManager.notify(System.currentTimeMillis().toInt(), builder.build())
     }
 
     private fun playNotificationSound() {
-        try {
-            RingtoneManager.getRingtone(applicationContext, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)).play()
-        } catch (e: Exception) {}
+        try { RingtoneManager.getRingtone(applicationContext, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)).play() } catch (e: Exception) {}
     }
 
     private fun startPollingGist() {
-        CoroutineScope(Dispatchers.IO).launch {
-            while (isPolling) {
-                fetchGist()
-                delay(2000)
-            }
-        }
+        CoroutineScope(Dispatchers.IO).launch { while (isPolling) { fetchGist(); delay(5000) } }
     }
 
     private fun fetchGist() {
@@ -320,7 +483,6 @@ class MainActivity : AppCompatActivity() {
                         CoroutineScope(Dispatchers.Main).launch {
                             updateChatUI()
                             updateUserCount()
-
                             if (!isFirstLoad && !isMe) {
                                 playNotificationSound()
                                 showNotification(lastMessage.device, decryptMessage(lastMessage.message))
@@ -338,9 +500,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun pushGistUpdate(history: List<ChatMessage>) {
         val payload = JSONObject().apply {
-            put("files", JSONObject().apply {
-                put("chat_ledger.json", JSONObject().apply { put("content", gson.toJson(history)) })
-            })
+            put("files", JSONObject().apply { put("chat_ledger.json", JSONObject().apply { put("content", gson.toJson(history)) }) })
         }
         val request = Request.Builder()
             .url("https://api.github.com/gists/${BuildConfig.CHAT_GIST_ID}")
@@ -351,11 +511,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateUserCount() {
-        val uniqueDevices = chatHistory.map { it.device }.distinct().size
-        userCountText.text = "$uniqueDevices users"
+        userCountText.text = "${chatHistory.map { it.device }.distinct().size} users"
     }
 
-    // --- UI DRAWING ---
+    // --- CHAT UI ---
     private fun updateChatUI() {
         chatMessageContainer.removeAllViews()
         val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
@@ -384,27 +543,54 @@ class MainActivity : AppCompatActivity() {
                 })
             }
 
+            if (msg.driveFileId != null && msg.fileType != null) {
+                val decryptedFileId = decryptMessage(msg.driveFileId)
+                
+                val attachmentContainer = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, 8, 0, 16)
+                }
+
+                val downloadIcon = ImageView(this).apply {
+                    setImageResource(android.R.drawable.stat_sys_download)
+                    setColorFilter(Color.parseColor("#075E54"))
+                    layoutParams = LinearLayout.LayoutParams(64, 64).apply { setMargins(0, 0, 16, 0) }
+                }
+
+                val attachmentText = TextView(this).apply {
+                    text = if (msg.fileType.startsWith("image/")) "Image Attachment" else "Document Attachment"
+                    textSize = 14f
+                    setTypeface(null, Typeface.BOLD)
+                    setTextColor(Color.parseColor("#075E54"))
+                }
+
+                attachmentContainer.addView(downloadIcon)
+                attachmentContainer.addView(attachmentText)
+                
+                attachmentContainer.setOnClickListener {
+                    triggerDownload(decryptedFileId, "attachment")
+                }
+                
+                bubbleLayout.addView(attachmentContainer)
+            }
+
             val decryptedText = decryptMessage(msg.message)
             val messageView = TextView(this).apply {
                 textSize = 16f
                 setTextColor(Color.BLACK)
                 
-                // Handle Search Highlighting
                 if (currentSearchQuery.isNotEmpty() && decryptedText.contains(currentSearchQuery, ignoreCase = true)) {
                     val spannable = SpannableString(decryptedText)
                     val startPos = decryptedText.indexOf(currentSearchQuery, ignoreCase = true)
-                    
-                    // Highlight color depends on if it's the currently focused match
                     val isFocusedMatch = searchMatchIndices.isNotEmpty() && currentSearchIndex >= 0 && searchMatchIndices[currentSearchIndex] == index
-                    val highlightColor = if (isFocusedMatch) Color.parseColor("#FF9800") else Color.YELLOW // Orange for focus, yellow for others
+                    val highlightColor = if (isFocusedMatch) Color.parseColor("#FF9800") else Color.YELLOW
                     val textColor = if (isFocusedMatch) Color.WHITE else Color.BLACK
 
                     spannable.setSpan(BackgroundColorSpan(highlightColor), startPos, startPos + currentSearchQuery.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
                     spannable.setSpan(ForegroundColorSpan(textColor), startPos, startPos + currentSearchQuery.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
                     text = spannable
-                } else {
-                    text = decryptedText
-                }
+                } else text = decryptedText
             }
             bubbleLayout.addView(messageView)
 
@@ -418,9 +604,7 @@ class MainActivity : AppCompatActivity() {
             })
 
             val wrapper = LinearLayout(this).apply {
-                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    setMargins(0, 12, 0, 12)
-                }
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(0, 12, 0, 12) }
                 gravity = if (isMe) Gravity.END else Gravity.START
                 setPadding(if (isMe) 150 else 0, 0, if (isMe) 0 else 150, 0)
             }
@@ -428,7 +612,6 @@ class MainActivity : AppCompatActivity() {
             chatMessageContainer.addView(wrapper)
         }
 
-        // Only auto-scroll to bottom if we are NOT actively searching
         if (currentSearchQuery.isEmpty() && chatMessageContainer.childCount > 0) {
             chatScrollView.post { chatScrollView.smoothScrollTo(0, chatMessageContainer.bottom) }
         }
