@@ -2,7 +2,9 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#ECE5DD"> <LinearLayout
+    android:background="#ECE5DD">
+
+    <LinearLayout
         android:id="@+id/loginLayout"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -27,19 +29,11 @@
             android:textColor="#888888"
             android:layout_marginBottom="32dp"/>
 
-        <EditText
-            android:id="@+id/pinInput"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="Enter Secret Encryption PIN"
-            android:inputType="numberPassword"
-            android:layout_marginBottom="24dp"/>
-
         <Button
             android:id="@+id/loginButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Decrypt & Enter Chat" />
+            android:text="Connect to Secure Chat" />
     </LinearLayout>
 
     <LinearLayout
