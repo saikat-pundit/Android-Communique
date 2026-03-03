@@ -1,5 +1,10 @@
 package com.yourname.communique
 
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -11,6 +16,8 @@ import android.view.Gravity
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationCompat
 import com.bumptech.glide.Glide
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
@@ -34,7 +41,8 @@ class MainActivity : AppCompatActivity() {
     private var currentDeviceName = ""
     private var chatHistory = mutableListOf<ChatMessage>()
     private var isPolling = false
-    private var isFirstLoad = true // Prevents notification sound on initial boot
+    private var isFirstLoad = true
+    private val CHANNEL_ID = "communique_chat"
 
     private lateinit var chatMessageContainer: LinearLayout
     private lateinit var chatScrollView: ScrollView
@@ -43,11 +51,17 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Generate Device Name
+        // Request Notification Permissions (Android 13+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+            }
+        }
+        createNotificationChannel()
+
         val manufacturer = Build.MANUFACTURER.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
         currentDeviceName = "$manufacturer ${Build.MODEL}"
 
-        // Bind UI
         val loginLayout = findViewById<LinearLayout>(R.id.loginLayout)
         val chatLayout = findViewById<LinearLayout>(R.id.chatLayout)
         val loginTriggerButton = findViewById<Button>(R.id.loginTriggerButton)
@@ -63,14 +77,8 @@ class MainActivity : AppCompatActivity() {
 
         detectedDeviceText.text = "Device Name: $currentDeviceName"
 
-        // Load the GIF safely
-        try {
-            Glide.with(this).asGif().load(R.drawable.login).into(gifImageView)
-        } catch (e: Exception) {
-            e.printStackTrace() // Fails gracefully if user hasn't uploaded the GIF yet
-        }
+        try { Glide.with(this).asGif().load(R.drawable.login).into(gifImageView) } catch (e: Exception) {}
 
-        // Animation: Reveal PIN field
         loginTriggerButton.setOnClickListener {
             loginTriggerButton.animate().alpha(0f).setDuration(300).withEndAction {
                 loginTriggerButton.visibility = View.GONE
@@ -79,14 +87,12 @@ class MainActivity : AppCompatActivity() {
             }.start()
         }
 
-        // Animation: Login & Enter Chat
         unlockButton.setOnClickListener {
             if (pinInput.text.toString() == "3142") {
                 loginLayout.animate().alpha(0f).setDuration(500).withEndAction {
                     loginLayout.visibility = View.GONE
                     chatLayout.visibility = View.VISIBLE
                     chatLayout.animate().alpha(1f).setDuration(600).start()
-                    
                     isPolling = true
                     startPollingGist()
                 }.start()
@@ -109,7 +115,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // --- ENCRYPTION (Unchanged) ---
+    // --- ENCRYPTION ---
     private fun getSecretKey(): SecretKeySpec {
         val digest = MessageDigest.getInstance("SHA-256")
         val keyBytes = digest.digest(BuildConfig.ENCRYPTION_KEY.toByteArray(Charsets.UTF_8))
@@ -130,7 +136,43 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) { "🔒 [Decryption Failed]" }
     }
 
-    // --- NETWORK & NOTIFICATIONS ---
+    // --- NOTIFICATIONS & NETWORK ---
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(CHANNEL_ID, "Communique Chat", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "New message notifications"
+            }
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun showNotification(sender: String, message: String) {
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_menu_send)
+            .setContentTitle(sender)
+            .setContentText(message)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                notificationManager.notify(System.currentTimeMillis().toInt(), builder.build())
+            }
+        } else {
+            notificationManager.notify(System.currentTimeMillis().toInt(), builder.build())
+        }
+    }
+
+    private fun playNotificationSound() {
+        try {
+            val notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            RingtoneManager.getRingtone(applicationContext, notification).play()
+        } catch (e: Exception) {}
+    }
+
     private fun startPollingGist() {
         CoroutineScope(Dispatchers.IO).launch {
             while (isPolling) {
@@ -138,14 +180,6 @@ class MainActivity : AppCompatActivity() {
                 delay(2000)
             }
         }
-    }
-
-    private fun playNotificationSound() {
-        try {
-            val notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            val r = RingtoneManager.getRingtone(applicationContext, notification)
-            r.play()
-        } catch (e: Exception) { e.printStackTrace() }
     }
 
     private fun fetchGist() {
@@ -162,19 +196,25 @@ class MainActivity : AppCompatActivity() {
                     val fetchedHistory: List<ChatMessage> = gson.fromJson(content, object : TypeToken<List<ChatMessage>>() {}.type) ?: emptyList()
 
                     if (fetchedHistory.size > chatHistory.size) {
+                        // Find the very last message in the new batch
+                        val lastMessage = fetchedHistory.last()
+                        val isMe = lastMessage.device == currentDeviceName
+                        
                         chatHistory.clear()
                         chatHistory.addAll(fetchedHistory)
                         
                         CoroutineScope(Dispatchers.Main).launch { 
                             updateChatUI()
-                            // Only play sound if it's NOT the first time loading the chat
-                            if (!isFirstLoad) {
+                            
+                            // If it's NOT the first load, and the message is NOT from me, trigger alerts
+                            if (!isFirstLoad && !isMe) {
                                 playNotificationSound()
+                                showNotification(lastMessage.device, decryptMessage(lastMessage.message))
                             }
                             isFirstLoad = false
                         }
                     } else if (isFirstLoad) {
-                        isFirstLoad = false // Mark as loaded even if no new messages exist
+                        isFirstLoad = false
                     }
                 }
             }
@@ -249,7 +289,6 @@ class MainActivity : AppCompatActivity() {
             wrapper.addView(bubbleLayout)
             chatMessageContainer.addView(wrapper)
         }
-        // Smooth scroll for a professional feel
         chatScrollView.post { chatScrollView.smoothScrollTo(0, chatMessageContainer.bottom) }
     }
 }
