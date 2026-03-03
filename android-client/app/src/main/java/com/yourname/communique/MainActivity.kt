@@ -1,7 +1,12 @@
 package com.yourname.communique
 
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
+import android.util.Base64
+import android.view.Gravity
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
@@ -12,10 +17,12 @@ import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.*
+import javax.crypto.Cipher
+import javax.crypto.spec.SecretKeySpec
 
-// Data class to represent a single message
 data class ChatMessage(val device: String, val message: String, val timestamp: Long)
 
 class MainActivity : AppCompatActivity() {
@@ -26,12 +33,6 @@ class MainActivity : AppCompatActivity() {
     private var chatHistory = mutableListOf<ChatMessage>()
     private var isPolling = false
 
-    // UI Elements
-    private lateinit var loginLayout: LinearLayout
-    private lateinit var chatLayout: LinearLayout
-    private lateinit var deviceNameInput: EditText
-    private lateinit var pinInput: EditText
-    private lateinit var messageInput: EditText
     private lateinit var chatMessageContainer: LinearLayout
     private lateinit var chatScrollView: ScrollView
 
@@ -39,47 +40,41 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Bind UI Elements
-        loginLayout = findViewById(R.id.loginLayout)
-        chatLayout = findViewById(R.id.chatLayout)
-        deviceNameInput = findViewById(R.id.deviceNameInput)
-        pinInput = findViewById(R.id.pinInput)
-        messageInput = findViewById(R.id.messageInput)
+        // 1. Fetch exact OEM Device Name automatically
+        val manufacturer = Build.MANUFACTURER.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+        currentDeviceName = "$manufacturer ${Build.MODEL}"
+
+        val loginLayout = findViewById<LinearLayout>(R.id.loginLayout)
+        val chatLayout = findViewById<LinearLayout>(R.id.chatLayout)
+        val messageInput = findViewById<EditText>(R.id.messageInput)
+        val detectedDeviceText = findViewById<TextView>(R.id.detectedDeviceText)
+        
         chatMessageContainer = findViewById(R.id.chatMessageContainer)
         chatScrollView = findViewById(R.id.chatScrollView)
 
-        val loginButton = findViewById<Button>(R.id.loginButton)
-        val sendButton = findViewById<Button>(R.id.sendButton)
+        detectedDeviceText.text = "Device: $currentDeviceName"
 
-        // Handle Login / PIN Check
-        loginButton.setOnClickListener {
-            val pin = pinInput.text.toString()
-            val name = deviceNameInput.text.toString().trim()
-
-            if (pin == "3142" && name.isNotEmpty()) {
-                currentDeviceName = name
-                loginLayout.visibility = View.GONE
-                chatLayout.visibility = View.VISIBLE
-                Toast.makeText(this, "Welcome, $name", Toast.LENGTH_SHORT).show()
-                
-                // Start pulling messages from GitHub
-                isPolling = true
-                startPollingGist()
-            } else {
-                Toast.makeText(this, "Invalid PIN or empty Device Name", Toast.LENGTH_SHORT).show()
-            }
+        findViewById<Button>(R.id.loginButton).setOnClickListener {
+            // Log in automatically without a PIN
+            loginLayout.visibility = View.GONE
+            chatLayout.visibility = View.VISIBLE
+            
+            isPolling = true
+            startPollingGist()
         }
 
-        // Handle Sending a Message
-        sendButton.setOnClickListener {
+        findViewById<Button>(R.id.sendButton).setOnClickListener {
             val text = messageInput.text.toString().trim()
             if (text.isNotEmpty()) {
                 messageInput.text.clear()
-                val newMessage = ChatMessage(currentDeviceName, text, System.currentTimeMillis())
+                
+                // Encrypt using the Universal Key
+                val encryptedText = encryptMessage(text)
+                val newMessage = ChatMessage(currentDeviceName, encryptedText, System.currentTimeMillis())
+                
                 chatHistory.add(newMessage)
                 updateChatUI()
                 
-                // Send to GitHub Gist
                 CoroutineScope(Dispatchers.IO).launch {
                     pushGistUpdate(chatHistory)
                 }
@@ -87,17 +82,43 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Function to constantly check for new messages every 5 seconds
+    // --- AES-256 UNIVERSAL ENCRYPTION LOGIC ---
+    private fun getSecretKey(): SecretKeySpec {
+        // Fetches the secret injected by GitHub Actions securely
+        val universalKey = BuildConfig.ENCRYPTION_KEY
+        val digest = MessageDigest.getInstance("SHA-256")
+        val keyBytes = digest.digest(universalKey.toByteArray(Charsets.UTF_8))
+        return SecretKeySpec(keyBytes, "AES")
+    }
+
+    private fun encryptMessage(message: String): String {
+        val cipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
+        cipher.init(Cipher.ENCRYPT_MODE, getSecretKey())
+        val encryptedBytes = cipher.doFinal(message.toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(encryptedBytes, Base64.DEFAULT)
+    }
+
+    private fun decryptMessage(encryptedMessage: String): String {
+        return try {
+            val cipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, getSecretKey())
+            val decodedBytes = Base64.decode(encryptedMessage, Base64.DEFAULT)
+            String(cipher.doFinal(decodedBytes), Charsets.UTF_8)
+        } catch (e: Exception) {
+            "🔒 [Decryption Failed - Key Mismatch]"
+        }
+    }
+    // --------------------------------
+
     private fun startPollingGist() {
         CoroutineScope(Dispatchers.IO).launch {
             while (isPolling) {
                 fetchGist()
-                delay(5000) // Wait 5 seconds before checking again
+                delay(3000)
             }
         }
     }
 
-    // Fetch the JSON from GitHub
     private fun fetchGist() {
         val request = Request.Builder()
             .url("https://api.github.com/gists/${BuildConfig.CHAT_GIST_ID}")
@@ -110,15 +131,11 @@ class MainActivity : AppCompatActivity() {
                     val responseData = response.body?.string()
                     if (responseData != null) {
                         val jsonObject = JSONObject(responseData)
-                        val files = jsonObject.getJSONObject("files")
-                        val chatFile = files.getJSONObject("chat_ledger.json")
-                        val content = chatFile.getString("content")
+                        val content = jsonObject.getJSONObject("files").getJSONObject("chat_ledger.json").getString("content")
 
-                        // Convert JSON string back to a list of ChatMessage objects
                         val listType = object : TypeToken<List<ChatMessage>>() {}.type
                         val fetchedHistory: List<ChatMessage> = gson.fromJson(content, listType) ?: emptyList()
 
-                        // If there are new messages, update the UI
                         if (fetchedHistory.size > chatHistory.size) {
                             chatHistory.clear()
                             chatHistory.addAll(fetchedHistory)
@@ -127,20 +144,14 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) {}
     }
 
-    // Upload the new JSON array to GitHub
     private fun pushGistUpdate(history: List<ChatMessage>) {
-        val jsonString = gson.toJson(history)
-        
-        // GitHub Gist API requires a specific JSON structure to update a file
         val payload = JSONObject()
         val files = JSONObject()
         val fileContent = JSONObject()
-        fileContent.put("content", jsonString)
+        fileContent.put("content", gson.toJson(history))
         files.put("chat_ledger.json", fileContent)
         payload.put("files", files)
 
@@ -148,51 +159,72 @@ class MainActivity : AppCompatActivity() {
         val request = Request.Builder()
             .url("https://api.github.com/gists/${BuildConfig.CHAT_GIST_ID}")
             .addHeader("Authorization", "Bearer ${BuildConfig.GIST_TOKEN}")
-            .patch(body) // We use PATCH to update an existing Gist
+            .patch(body)
             .build()
 
-        try {
-            httpClient.newCall(request).execute().close()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        try { httpClient.newCall(request).execute().close() } catch (e: Exception) {}
     }
 
-    // Draw the text messages on the screen
+    // --- UPGRADED CHAT UI ---
     private fun updateChatUI() {
         chatMessageContainer.removeAllViews()
         val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
 
         for (msg in chatHistory) {
-            val textView = TextView(this).apply {
-                text = "[${timeFormat.format(Date(msg.timestamp))}] ${msg.device}:\n${msg.message}"
-                textSize = 16f
-                setPadding(16, 16, 16, 16)
-                
-                // Make our own messages green, and others gray
-                if (msg.device == currentDeviceName) {
-                    setBackgroundColor(Color.parseColor("#E8F5E9")) // Light green
-                    textAlignment = View.TEXT_ALIGNMENT_TEXT_END
-                } else {
-                    setBackgroundColor(Color.parseColor("#F5F5F5")) // Light gray
-                    textAlignment = View.TEXT_ALIGNMENT_TEXT_START
-                }
+            // Decrypt using the Universal Key
+            val decryptedText = decryptMessage(msg.message)
+            val isMe = msg.device == currentDeviceName
+
+            val bubbleShape = GradientDrawable().apply {
+                cornerRadius = 32f
+                setColor(if (isMe) Color.parseColor("#DCF8C6") else Color.parseColor("#FFFFFF"))
             }
-            
-            // Add margin between messages
-            val params = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            params.setMargins(0, 8, 0, 8)
-            textView.layoutParams = params
-            
-            chatMessageContainer.addView(textView)
+
+            val bubbleLayout = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = bubbleShape
+                setPadding(32, 24, 32, 24)
+            }
+
+            if (!isMe) {
+                val senderView = TextView(this).apply {
+                    text = msg.device
+                    textSize = 12f
+                    setTextColor(Color.parseColor("#075E54"))
+                    setTypeface(null, Typeface.BOLD)
+                    setPadding(0, 0, 0, 8)
+                }
+                bubbleLayout.addView(senderView)
+            }
+
+            val messageView = TextView(this).apply {
+                text = decryptedText
+                textSize = 16f
+                setTextColor(Color.BLACK)
+            }
+            bubbleLayout.addView(messageView)
+
+            val timeView = TextView(this).apply {
+                text = timeFormat.format(Date(msg.timestamp))
+                textSize = 10f
+                setTextColor(Color.GRAY)
+                setTypeface(null, Typeface.ITALIC)
+                gravity = Gravity.END
+                setPadding(0, 8, 0, 0)
+            }
+            bubbleLayout.addView(timeView)
+
+            val wrapper = LinearLayout(this).apply {
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    setMargins(0, 8, 0, 8)
+                }
+                gravity = if (isMe) Gravity.END else Gravity.START
+                setPadding(if (isMe) 120 else 0, 0, if (isMe) 0 else 120, 0)
+            }
+            wrapper.addView(bubbleLayout)
+            chatMessageContainer.addView(wrapper)
         }
 
-        // Scroll to the bottom to see the newest message
-        chatScrollView.post {
-            chatScrollView.fullScroll(View.FOCUS_DOWN)
-        }
+        chatScrollView.post { chatScrollView.fullScroll(View.FOCUS_DOWN) }
     }
 }
