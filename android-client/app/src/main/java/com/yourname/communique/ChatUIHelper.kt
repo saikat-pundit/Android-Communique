@@ -46,7 +46,7 @@ object ChatUIHelper {
         }
     }
 
-    // FEATURE 2: Minimized Padding & FEATURE 1: Media Download Restriction
+    // FEATURE 2: Minimized Padding, Media Download Restriction, and Message Quoting!
     fun buildMessageBubble(
         context: Context,
         msg: ChatMessage,
@@ -57,37 +57,37 @@ object ChatUIHelper {
         currentSearchQuery: String,
         isFocusedSearchMatch: Boolean,
         mediaManager: MediaManager,
-        onDownloadClicked: (String, String, String) -> Unit
+        onDownloadClicked: (String, String, String) -> Unit,
+        onMessageLongClick: (String, String) -> Unit // <--- ADDED LISTENER FOR REPLIES
     ): LinearLayout {
         val isMe = msg.device == currentDeviceName
         
         val bubbleShape = GradientDrawable()
-        bubbleShape.cornerRadius = 32f // Slightly sharper corners save space
+        bubbleShape.cornerRadius = 32f 
         if (isMe) bubbleShape.setColor(Color.parseColor("#DCF8C6")) else bubbleShape.setColor(Color.parseColor("#FFFFFF"))
 
         val bubbleLayout = LinearLayout(context)
         bubbleLayout.orientation = LinearLayout.VERTICAL
         bubbleLayout.background = bubbleShape
-        bubbleLayout.setPadding(24, 16, 24, 16) // REDUCED: Minimal internal padding
+        bubbleLayout.setPadding(24, 16, 24, 16) 
         bubbleLayout.elevation = 2f
 
         if (!isMe) {
             val deviceText = TextView(context)
             deviceText.text = msg.device
-            deviceText.textSize = 11f // Slightly smaller text for names
+            deviceText.textSize = 11f 
             deviceText.setTextColor(Color.parseColor("#007BFF"))
             deviceText.setTypeface(null, Typeface.BOLD)
-            deviceText.setPadding(0, 0, 0, 4) // REDUCED PADDING
+            deviceText.setPadding(0, 0, 0, 4) 
             bubbleLayout.addView(deviceText)
         }
 
         if (decryptedFileId != null && msg.fileType != null) {
             val fileName = msg.fileName ?: "attachment"
             
-            // Only auto-download if it's an image AND the isAutoDownload flag is true
             if (msg.fileType.startsWith("image/") && isAutoDownload) {
                 val thumbnailView = ImageView(context)
-                val params = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 400) // Reduced height
+                val params = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 400) 
                 params.setMargins(0, 4, 0, 8)
                 thumbnailView.layoutParams = params
                 thumbnailView.scaleType = ImageView.ScaleType.CENTER_CROP
@@ -100,7 +100,6 @@ object ChatUIHelper {
                     mediaManager.loadThumbnail(decryptedFileId, fileName, thumbnailView)
                 }
             } else {
-                // Click to view for EVERYTHING else
                 val attachmentContainer = LinearLayout(context)
                 attachmentContainer.orientation = LinearLayout.HORIZONTAL
                 attachmentContainer.gravity = Gravity.CENTER_VERTICAL
@@ -109,7 +108,7 @@ object ChatUIHelper {
                 val downloadIcon = ImageView(context)
                 downloadIcon.setImageResource(android.R.drawable.ic_menu_save)
                 downloadIcon.setColorFilter(Color.parseColor("#075E54"))
-                val iconParams = LinearLayout.LayoutParams(40, 40) // Smaller icon
+                val iconParams = LinearLayout.LayoutParams(40, 40) 
                 iconParams.setMargins(0, 0, 12, 0)
                 downloadIcon.layoutParams = iconParams
 
@@ -125,6 +124,42 @@ object ChatUIHelper {
                 bubbleLayout.addView(attachmentContainer)
             }
         }
+
+        // --- NEW: RENDER QUOTED MESSAGE ---
+        if (msg.replyToDevice != null && msg.replyToText != null) {
+            val decryptedReplyDevice = CryptoHelper.decrypt(msg.replyToDevice)
+            val decryptedReplyText = CryptoHelper.decrypt(msg.replyToText)
+
+            val quoteLayout = LinearLayout(context)
+            quoteLayout.orientation = LinearLayout.VERTICAL
+            quoteLayout.setPadding(16, 8, 16, 8)
+            
+            val quoteShape = GradientDrawable()
+            quoteShape.cornerRadius = 16f
+            quoteShape.setColor(Color.parseColor(if (isMe) "#CDEBB5" else "#F0F0F0"))
+            quoteLayout.background = quoteShape
+            
+            val quoteParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            quoteParams.setMargins(0, 0, 0, 12)
+            quoteLayout.layoutParams = quoteParams
+
+            val quoteDevice = TextView(context)
+            quoteDevice.text = decryptedReplyDevice
+            quoteDevice.textSize = 10f
+            quoteDevice.setTextColor(Color.parseColor("#007BFF"))
+            quoteDevice.setTypeface(null, Typeface.BOLD)
+            
+            val quoteText = TextView(context)
+            quoteText.text = if (decryptedReplyText.length > 50) decryptedReplyText.take(50) + "..." else decryptedReplyText
+            quoteText.textSize = 12f
+            quoteText.setTextColor(Color.DKGRAY)
+            quoteText.setTypeface(null, Typeface.ITALIC)
+
+            quoteLayout.addView(quoteDevice)
+            quoteLayout.addView(quoteText)
+            bubbleLayout.addView(quoteLayout)
+        }
+        // ----------------------------------
 
         val messageView = TextView(context)
         messageView.textSize = 15f
@@ -152,20 +187,27 @@ object ChatUIHelper {
         timeText.setTextColor(Color.GRAY)
         timeText.setTypeface(null, Typeface.ITALIC)
         timeText.gravity = Gravity.END
-        timeText.setPadding(0, 4, 0, 0) // REDUCED PADDING
+        timeText.setPadding(0, 4, 0, 0) 
         bubbleLayout.addView(timeText)
+
+        // --- NEW: LONG CLICK TO TRIGGER REPLY ---
+        bubbleLayout.setOnLongClickListener {
+            onMessageLongClick(msg.device, decryptedText)
+            true
+        }
+        // ----------------------------------------
 
         val wrapper = LinearLayout(context)
         val wrapperParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         )
-        wrapperParams.setMargins(0, 6, 0, 6) // REDUCED: Space between message bubbles
+        wrapperParams.setMargins(0, 6, 0, 6) 
         wrapper.layoutParams = wrapperParams
         
         if (isMe) {
             wrapper.gravity = Gravity.END
-            wrapper.setPadding(100, 0, 0, 0) // Allows bubble to stretch wider
+            wrapper.setPadding(100, 0, 0, 0) 
         } else {
             wrapper.gravity = Gravity.START
             wrapper.setPadding(0, 0, 100, 0)
