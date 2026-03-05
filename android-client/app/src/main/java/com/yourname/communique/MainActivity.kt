@@ -69,8 +69,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var searchPositionText: TextView
     private lateinit var searchIndicatorLayout: LinearLayout
     private lateinit var messageInput: EditText
-    private var googleDriveAccessToken: String? = null
-    private val TARGET_DRIVE_FOLDER_ID = "1RjvnpZ6Nhwf22-7lrTvQxU_0wn-HM_1e"
 
     private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
@@ -210,7 +208,11 @@ class MainActivity : AppCompatActivity() {
     CoroutineScope(Dispatchers.Main).launch { updateChatUI() }
     CoroutineScope(Dispatchers.IO).launch { pushGistUpdate(chatHistory) }
 }
-
+    private fun encryptFileBytes(fileBytes: ByteArray): ByteArray {
+        val cipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
+        cipher.init(Cipher.ENCRYPT_MODE, getSecretKey())
+        return cipher.doFinal(fileBytes)
+    }
     private suspend fun fetchDriveAccessToken() {
         try {
             val b64Json = BuildConfig.DRIVE_JSON_B64
@@ -278,127 +280,116 @@ class MainActivity : AppCompatActivity() {
     }
 
     private suspend fun handleFileUpload(uri: Uri) {
-    withContext(Dispatchers.IO) {
-        try {
-            // Check if we have Drive access token
-            if (googleDriveAccessToken == null) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "Getting Drive access...", Toast.LENGTH_SHORT).show()
+        withContext(Dispatchers.IO) {
+            try {
+                val contentResolver = applicationContext.contentResolver
+                val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+                
+                // 1. Get file name
+                var fileName = "file_${System.currentTimeMillis()}"
+                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (cursor.moveToFirst()) {
+                        fileName = cursor.getString(nameIndex)
+                    }
                 }
-                fetchDriveAccessToken()
-                if (googleDriveAccessToken == null) {
+
+                // 2. Check file size (5MB limit as requested)
+                val fileSize = contentResolver.openInputStream(uri)?.available() ?: 0
+                if (fileSize > 5 * 1024 * 1024) {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(this@MainActivity, "Drive Auth Failed", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this@MainActivity, "File too large (max 5MB)", Toast.LENGTH_LONG).show()
                     }
                     return@withContext
                 }
-            }
 
-            val contentResolver = applicationContext.contentResolver
-            val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
-            
-            // Get file name
-            var fileName = "file_${System.currentTimeMillis()}"
-            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (cursor.moveToFirst()) {
-                    fileName = cursor.getString(nameIndex)
-                }
-            }
+                // 3. Read file and compress to WebP if it's an image
+                var fileBytes = contentResolver.openInputStream(uri)?.readBytes() ?: return@withContext
+                var finalMimeType = mimeType
+                var finalFileName = fileName
 
-            // Check file size (10MB limit)
-            val fileSize = contentResolver.openInputStream(uri)?.available() ?: 0
-            if (fileSize > 10 * 1024 * 1024) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "File too large (max 10MB)", Toast.LENGTH_LONG).show()
-                }
-                return@withContext
-            }
-
-            // Read file
-            var fileBytes = contentResolver.openInputStream(uri)?.readBytes() ?: return@withContext
-            var finalMimeType = mimeType
-            var finalFileName = fileName
-
-            // Compress images if they're large
-            if (mimeType.startsWith("image/") && fileSize > 1024 * 1024) {
-                try {
-                    val source = ImageDecoder.createSource(contentResolver, uri)
-                    val bitmap = ImageDecoder.decodeBitmap(source)
-                    val baos = ByteArrayOutputStream()
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 80, baos)
-                    fileBytes = baos.toByteArray()
-                    finalMimeType = "image/jpeg"
-                    finalFileName = fileName.substringBeforeLast(".") + ".jpg"
-                } catch (e: Exception) { }
-            }
-
-            withContext(Dispatchers.Main) {
-                Toast.makeText(this@MainActivity, "Uploading $finalFileName...", Toast.LENGTH_SHORT).show()
-            }
-
-            // Simple metadata
-            val metadata = JSONObject().apply {
-                put("name", finalFileName)
-                put("parents", JSONArray().put(TARGET_DRIVE_FOLDER_ID))
-            }
-
-            // Build request (simpler way)
-            val requestBody = MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart("metadata", null, metadata.toString().toRequestBody("application/json; charset=UTF-8".toMediaType()))
-                .addFormDataPart("file", finalFileName, fileBytes.toRequestBody(finalMimeType.toMediaType()))
-                .build()
-
-            val request = Request.Builder()
-                .url("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart")
-                .addHeader("Authorization", "Bearer $googleDriveAccessToken")
-                .post(requestBody)
-                .build()
-
-            httpClient.newCall(request).execute().use { response ->
-                val responseString = response.body?.string()
-                
-                if (response.isSuccessful && responseString != null) {
-                    val fileId = JSONObject(responseString).getString("id")
-                    
-                    // Make file public (so anyone can download)
+                if (mimeType.startsWith("image/")) {
                     try {
-                        val permissionBody = JSONObject().apply {
-                            put("role", "reader")
-                            put("type", "anyone")
+                        val source = ImageDecoder.createSource(contentResolver, uri)
+                        val bitmap = ImageDecoder.decodeBitmap(source)
+                        val baos = ByteArrayOutputStream()
+                        
+                        // Use WEBP format
+                        val format = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            Bitmap.CompressFormat.WEBP_LOSSY
+                        } else {
+                            @Suppress("DEPRECATION")
+                            Bitmap.CompressFormat.WEBP
                         }
-                        val permRequest = Request.Builder()
-                            .url("https://www.googleapis.com/drive/v3/files/$fileId/permissions")
-                            .addHeader("Authorization", "Bearer $googleDriveAccessToken")
-                            .post(permissionBody.toString().toRequestBody("application/json".toMediaType()))
-                            .build()
-                        httpClient.newCall(permRequest).execute().close()
-                    } catch (e: Exception) { }
-                    
-                    val text = messageInput.text.toString().ifEmpty { "Sent a file" }
-                    
-                    withContext(Dispatchers.Main) {
-                        messageInput.text.clear()
-                        Toast.makeText(this@MainActivity, "Upload complete!", Toast.LENGTH_SHORT).show()
-                    }
-                    
-                    sendMessage(text, fileId, finalMimeType, finalFileName)
-                    
-                } else {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(this@MainActivity, "Upload failed (${response.code})", Toast.LENGTH_LONG).show()
+                        
+                        bitmap.compress(format, 80, baos)
+                        fileBytes = baos.toByteArray()
+                        finalMimeType = "image/webp"
+                        finalFileName = fileName.substringBeforeLast(".") + ".webp"
+                    } catch (e: Exception) { 
+                        e.printStackTrace() 
                     }
                 }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            withContext(Dispatchers.Main) {
-                Toast.makeText(this@MainActivity, "Upload error: ${e.message}", Toast.LENGTH_LONG).show()
+
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Encrypting and Uploading $finalFileName...", Toast.LENGTH_SHORT).show()
+                }
+
+                // 4. Encrypt the file bytes and Base64 encode for JSON payload
+                val encryptedBytes = encryptFileBytes(fileBytes)
+                val base64File = Base64.encodeToString(encryptedBytes, Base64.DEFAULT)
+
+                // 5. Build JSON payload for Google Apps Script
+                val jsonPayload = JSONObject().apply {
+                    put("fileName", finalFileName)
+                    put("mimeType", "application/octet-stream") // It's encrypted binary now
+                    put("fileBase64", base64File)
+                }
+
+                val requestBody = jsonPayload.toString().toRequestBody("application/json; charset=UTF-8".toMediaType())
+
+                val request = Request.Builder()
+                    .url(BuildConfig.GAS_UPLOAD_URL)
+                    .post(requestBody)
+                    .build()
+
+                // 6. Send to Google Apps Script
+                httpClient.newCall(request).execute().use { response ->
+                    val responseString = response.body?.string()
+                    
+                    if (response.isSuccessful && responseString != null) {
+                        val jsonResponse = JSONObject(responseString)
+                        if (jsonResponse.optString("status") == "success") {
+                            val fileId = jsonResponse.getString("fileId")
+                            
+                            val text = messageInput.text.toString().ifEmpty { "Sent an encrypted file" }
+                            
+                            withContext(Dispatchers.Main) {
+                                messageInput.text.clear()
+                                Toast.makeText(this@MainActivity, "Upload complete!", Toast.LENGTH_SHORT).show()
+                            }
+                            
+                            // Send message with the new file ID
+                            sendMessage(text, fileId, finalMimeType, finalFileName)
+                        } else {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(this@MainActivity, "GAS Error: ${jsonResponse.optString("message")}", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(this@MainActivity, "Upload failed (${response.code})", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Upload error: ${e.message}", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
-}
 
     private fun triggerDownload(fileId: String, fileName: String, fileType: String) {
     val url = "https://drive.google.com/uc?export=download&id=$fileId"
