@@ -330,13 +330,57 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun triggerDownload(fileId: String, fileName: String, fileType: String) {
-    val url = "https://drive.google.com/uc?export=download&id=$fileId"
-    val intent = Intent(Intent.ACTION_VIEW).apply {
-        data = Uri.parse(url)
+        Toast.makeText(this, "Downloading and decrypting $fileName...", Toast.LENGTH_SHORT).show()
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                // 1. Download the encrypted file directly from Google Drive
+                val url = "https://drive.google.com/uc?export=download&id=$fileId"
+                val request = Request.Builder().url(url).build()
+
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) throw Exception("Failed to download file")
+
+                    val encryptedBytes = response.body?.bytes() ?: throw Exception("Empty file body")
+
+                    // 2. Decrypt the bytes
+                    val decryptedBytes = decryptFileBytes(encryptedBytes)
+
+                    // 3. Save the decrypted bytes to a local cache file so we can open it
+                    val cacheDir = File(cacheDir, "decrypted_media")
+                    if (!cacheDir.exists()) cacheDir.mkdirs()
+                    
+                    val file = File(cacheDir, fileName)
+                    file.writeBytes(decryptedBytes)
+
+                    // 4. Use FileProvider to safely share the file with other apps to view it
+                    val uri = androidx.core.content.FileProvider.getUriForFile(
+                        this@MainActivity,
+                        "${applicationContext.packageName}.provider",
+                        file
+                    )
+
+                    withContext(Dispatchers.Main) {
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(uri, fileType)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        
+                        try {
+                            startActivity(intent)
+                        } catch (e: Exception) {
+                            Toast.makeText(this@MainActivity, "No app found to open this file type.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, "Error opening file: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
-    startActivity(intent)
-    Toast.makeText(this, "Opening $fileName...", Toast.LENGTH_SHORT).show()
-}
 
     private fun closeSearch(container: LinearLayout, input: EditText) {
         container.visibility = View.GONE
