@@ -195,13 +195,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendMessage(rawText: String, driveFileId: String? = null, fileType: String? = null, fileName: String? = null) {
-        val encryptedText = encryptMessage(rawText)
-        val encryptedFileId = driveFileId?.let { encryptMessage(it) }
+        val encryptedText = CryptoHelper.encrypt(rawText)
+        val encryptedFileId = driveFileId?.let { CryptoHelper.encrypt(it) }
         
         val newMessage = ChatMessage(currentDeviceName, encryptedText, System.currentTimeMillis(), encryptedFileId, fileType, fileName)
         chatHistory.add(newMessage)
         CoroutineScope(Dispatchers.Main).launch { updateChatUI() }
-        CoroutineScope(Dispatchers.IO).launch { pushGistUpdate(chatHistory) }
+        CoroutineScope(Dispatchers.IO).launch { networkHelper.pushGistUpdate(chatHistory) }
     }
 
     private suspend fun handleFileUpload(uri: Uri) {
@@ -349,7 +349,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         for ((index, msg) in chatHistory.withIndex()) {
-            if (decryptMessage(msg.message).contains(currentSearchQuery, ignoreCase = true)) {
+            if (CryptoHelper.decrypt(msg.message).contains(currentSearchQuery, ignoreCase = true)) {
                 searchMatchIndices.add(index)
             }
         }
@@ -447,8 +447,8 @@ class MainActivity : AppCompatActivity() {
         val autoDownloadIndices = imageIndices.takeLast(2)
 
         for ((index, msg) in chatHistory.withIndex()) {
-            val decryptedText = decryptMessage(msg.message)
-            val decryptedFileId = msg.driveFileId?.let { decryptMessage(it) }
+            val decryptedText = CryptoHelper.decrypt(msg.message)
+            val decryptedFileId = msg.driveFileId?.let { CryptoHelper.decrypt(it) }
             val isFocusedMatch = searchMatchIndices.isNotEmpty() && currentSearchIndex >= 0 && searchMatchIndices[currentSearchIndex] == index
             val isAutoDownload = index in autoDownloadIndices
 
