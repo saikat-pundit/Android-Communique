@@ -1,13 +1,11 @@
 package com.yourname.communique
-import org.json.JSONArray
-import kotlinx.coroutines.withContext
+
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.ImageDecoder
 import android.graphics.Typeface
@@ -40,15 +38,12 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
-import java.security.KeyFactory
 import java.security.MessageDigest
-import java.security.Signature
-import java.security.spec.PKCS8EncodedKeySpec
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
-import java.io.File
+
 data class ChatMessage(val device: String, val message: String, val timestamp: Long, val driveFileId: String? = null, val fileType: String? = null, val fileName: String? = null)
 
 class MainActivity : AppCompatActivity() {
@@ -63,12 +58,16 @@ class MainActivity : AppCompatActivity() {
     private var currentSearchQuery = ""
     private var searchMatchIndices = mutableListOf<Int>()
     private var currentSearchIndex = -1
+    
     private lateinit var chatMessageContainer: LinearLayout
     private lateinit var chatScrollView: ScrollView
     private lateinit var userCountText: TextView
     private lateinit var searchPositionText: TextView
     private lateinit var searchIndicatorLayout: LinearLayout
     private lateinit var messageInput: EditText
+    
+    // NEW: Initialize MediaManager
+    private lateinit var mediaManager: MediaManager
 
     private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         uri?.let {
@@ -82,6 +81,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // Initialize MediaManager
+        mediaManager = MediaManager(this, httpClient)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -165,22 +167,14 @@ class MainActivity : AppCompatActivity() {
         
         searchUpBtn.setOnClickListener {
             if (searchMatchIndices.isNotEmpty()) {
-                currentSearchIndex = if (currentSearchIndex > 0) {
-                    currentSearchIndex - 1
-                } else {
-                    searchMatchIndices.size - 1
-                }
+                currentSearchIndex = if (currentSearchIndex > 0) currentSearchIndex - 1 else searchMatchIndices.size - 1
                 updateSearchIndicatorAndScroll()
             }
         }
 
         searchDownBtn.setOnClickListener {
             if (searchMatchIndices.isNotEmpty()) {
-                currentSearchIndex = if (currentSearchIndex < searchMatchIndices.size - 1) {
-                    currentSearchIndex + 1
-                } else {
-                    0
-                }
+                currentSearchIndex = if (currentSearchIndex < searchMatchIndices.size - 1) currentSearchIndex + 1 else 0
                 updateSearchIndicatorAndScroll()
             }
         }
@@ -199,49 +193,33 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendMessage(rawText: String, driveFileId: String? = null, fileType: String? = null, fileName: String? = null) {
-    val encryptedText = encryptMessage(rawText)
-    val encryptedFileId = driveFileId?.let { encryptMessage(it) }
-    
-    val newMessage = ChatMessage(currentDeviceName, encryptedText, System.currentTimeMillis(), encryptedFileId, fileType, fileName)
-    chatHistory.add(newMessage)
-    CoroutineScope(Dispatchers.Main).launch { updateChatUI() }
-    CoroutineScope(Dispatchers.IO).launch { pushGistUpdate(chatHistory) }
-}
-    private fun encryptFileBytes(fileBytes: ByteArray): ByteArray {
-        val cipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
-        cipher.init(Cipher.ENCRYPT_MODE, getSecretKey())
-        return cipher.doFinal(fileBytes)
+        val encryptedText = encryptMessage(rawText)
+        val encryptedFileId = driveFileId?.let { encryptMessage(it) }
+        
+        val newMessage = ChatMessage(currentDeviceName, encryptedText, System.currentTimeMillis(), encryptedFileId, fileType, fileName)
+        chatHistory.add(newMessage)
+        CoroutineScope(Dispatchers.Main).launch { updateChatUI() }
+        CoroutineScope(Dispatchers.IO).launch { pushGistUpdate(chatHistory) }
     }
-    private fun decryptFileBytes(encryptedBytes: ByteArray): ByteArray {
-        val cipher = Cipher.getInstance("AES/ECB/PKCS5Padding")
-        cipher.init(Cipher.DECRYPT_MODE, getSecretKey())
-        return cipher.doFinal(encryptedBytes)
-    }
+
     private suspend fun handleFileUpload(uri: Uri) {
         withContext(Dispatchers.IO) {
             try {
                 val contentResolver = applicationContext.contentResolver
                 val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
                 
-                // 1. Get file name
                 var fileName = "file_${System.currentTimeMillis()}"
                 contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                     val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (cursor.moveToFirst()) {
-                        fileName = cursor.getString(nameIndex)
-                    }
+                    if (cursor.moveToFirst()) fileName = cursor.getString(nameIndex)
                 }
 
-                // 2. Check file size (5MB limit as requested)
                 val fileSize = contentResolver.openInputStream(uri)?.available() ?: 0
                 if (fileSize > 5 * 1024 * 1024) {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(this@MainActivity, "File too large (max 5MB)", Toast.LENGTH_LONG).show()
-                    }
+                    withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "File too large (max 5MB)", Toast.LENGTH_LONG).show() }
                     return@withContext
                 }
 
-                // 3. Read file and compress to WebP if it's an image
                 var fileBytes = contentResolver.openInputStream(uri)?.readBytes() ?: return@withContext
                 var finalMimeType = mimeType
                 var finalFileName = fileName
@@ -251,131 +229,82 @@ class MainActivity : AppCompatActivity() {
                         val source = ImageDecoder.createSource(contentResolver, uri)
                         val bitmap = ImageDecoder.decodeBitmap(source)
                         val baos = ByteArrayOutputStream()
-                        
-                        // Use WEBP format
-                        val format = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                            Bitmap.CompressFormat.WEBP_LOSSY
-                        } else {
-                            @Suppress("DEPRECATION")
-                            Bitmap.CompressFormat.WEBP
-                        }
-                        
+                        val format = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY else @Suppress("DEPRECATION") Bitmap.CompressFormat.WEBP
                         bitmap.compress(format, 80, baos)
                         fileBytes = baos.toByteArray()
                         finalMimeType = "image/webp"
                         finalFileName = fileName.substringBeforeLast(".") + ".webp"
-                    } catch (e: Exception) { 
-                        e.printStackTrace() 
-                    }
+                    } catch (e: Exception) { e.printStackTrace() }
                 }
 
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "Encrypting and Uploading $finalFileName...", Toast.LENGTH_SHORT).show()
-                }
+                withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "Encrypting and Uploading $finalFileName...", Toast.LENGTH_SHORT).show() }
 
-                // 4. Encrypt the file bytes and Base64 encode for JSON payload
-                val encryptedBytes = encryptFileBytes(fileBytes)
+                // USE MEDIAMANAGER TO ENCRYPT
+                val encryptedBytes = mediaManager.encryptFileBytes(fileBytes)
                 val base64File = Base64.encodeToString(encryptedBytes, Base64.DEFAULT)
 
-                // 5. Build JSON payload for Google Apps Script
                 val jsonPayload = JSONObject().apply {
                     put("fileName", finalFileName)
-                    put("mimeType", "application/octet-stream") // It's encrypted binary now
+                    put("mimeType", "application/octet-stream")
                     put("fileBase64", base64File)
                 }
 
                 val requestBody = jsonPayload.toString().toRequestBody("application/json; charset=UTF-8".toMediaType())
+                val request = Request.Builder().url(BuildConfig.GAS_UPLOAD_URL).post(requestBody).build()
 
-                val request = Request.Builder()
-                    .url(BuildConfig.GAS_UPLOAD_URL)
-                    .post(requestBody)
-                    .build()
-
-                // 6. Send to Google Apps Script
                 httpClient.newCall(request).execute().use { response ->
                     val responseString = response.body?.string()
-                    
                     if (response.isSuccessful && responseString != null) {
                         val jsonResponse = JSONObject(responseString)
                         if (jsonResponse.optString("status") == "success") {
                             val fileId = jsonResponse.getString("fileId")
-                            
                             val text = messageInput.text.toString().ifEmpty { "Sent an encrypted file" }
-                            
                             withContext(Dispatchers.Main) {
                                 messageInput.text.clear()
                                 Toast.makeText(this@MainActivity, "Upload complete!", Toast.LENGTH_SHORT).show()
                             }
-                            
-                            // Send message with the new file ID
                             sendMessage(text, fileId, finalMimeType, finalFileName)
                         } else {
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(this@MainActivity, "GAS Error: ${jsonResponse.optString("message")}", Toast.LENGTH_LONG).show()
-                            }
+                            withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "GAS Error: ${jsonResponse.optString("message")}", Toast.LENGTH_LONG).show() }
                         }
                     } else {
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(this@MainActivity, "Upload failed (${response.code})", Toast.LENGTH_LONG).show()
-                        }
+                        withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "Upload failed (${response.code})", Toast.LENGTH_LONG).show() }
                     }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "Upload error: ${e.message}", Toast.LENGTH_LONG).show()
-                }
+                withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "Upload error: ${e.message}", Toast.LENGTH_LONG).show() }
             }
         }
     }
 
     private fun triggerDownload(fileId: String, fileName: String, fileType: String) {
-        Toast.makeText(this, "Downloading and decrypting $fileName...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Downloading and decrypting...", Toast.LENGTH_SHORT).show()
 
         CoroutineScope(Dispatchers.IO).launch {
-            try {
-                // 1. Download the encrypted file directly from Google Drive
-                val url = "https://drive.google.com/uc?export=download&id=$fileId"
-                val request = Request.Builder().url(url).build()
-
-                httpClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) throw Exception("Failed to download file")
-
-                    val encryptedBytes = response.body?.bytes() ?: throw Exception("Empty file body")
-
-                    // 2. Decrypt the bytes
-                    val decryptedBytes = decryptFileBytes(encryptedBytes)
-
-                    // 3. Save the decrypted bytes to a local cache file so we can open it
-                    val mediaDir = File(cacheDir, "decrypted_media")
-                    if (!mediaDir.exists()) mediaDir.mkdirs()
-                    val file = File(mediaDir, fileName)
-                    file.writeBytes(decryptedBytes)
-
-                    // 4. Use FileProvider to safely share the file with other apps to view it
-                    val uri = androidx.core.content.FileProvider.getUriForFile(
-                        this@MainActivity,
-                        "${applicationContext.packageName}.provider",
-                        file
-                    )
-
-                    withContext(Dispatchers.Main) {
-                        val intent = Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(uri, fileType)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        
-                        try {
-                            startActivity(intent)
-                        } catch (e: Exception) {
-                            Toast.makeText(this@MainActivity, "No app found to open this file type.", Toast.LENGTH_SHORT).show()
-                        }
+            // USE MEDIAMANAGER TO DOWNLOAD AND DECRYPT
+            val file = mediaManager.downloadAndDecryptFile(fileId, fileName)
+            
+            if (file != null) {
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    this@MainActivity,
+                    "${applicationContext.packageName}.provider",
+                    file
+                )
+                withContext(Dispatchers.Main) {
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, fileType)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    try {
+                        startActivity(intent)
+                    } catch (e: Exception) {
+                        Toast.makeText(this@MainActivity, "No app found to open this file.", Toast.LENGTH_SHORT).show()
                     }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } else {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "Error opening file: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, "Failed to download or decrypt file.", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -412,7 +341,6 @@ class MainActivity : AppCompatActivity() {
         } else {
             searchIndicatorLayout.visibility = View.GONE
         }
-        
         updateSearchIndicatorAndScroll()
     }
 
@@ -427,6 +355,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Keep Text Encryption here in MainActivity
     private fun getSecretKey(): SecretKeySpec {
         val digest = MessageDigest.getInstance("SHA-256")
         val keyBytes = digest.digest(BuildConfig.ENCRYPTION_KEY.toByteArray(Charsets.UTF_8))
@@ -549,7 +478,7 @@ class MainActivity : AppCompatActivity() {
         userCountText.text = "${chatHistory.map { it.device }.distinct().size} users"
     }
 
-        private fun updateChatUI() {
+    private fun updateChatUI() {
         chatMessageContainer.removeAllViews()
         val timeFormat = SimpleDateFormat("hh:mm a", Locale.getDefault())
 
@@ -558,11 +487,7 @@ class MainActivity : AppCompatActivity() {
             
             val bubbleShape = GradientDrawable()
             bubbleShape.cornerRadius = 48f
-            if (isMe) {
-                bubbleShape.setColor(Color.parseColor("#DCF8C6"))
-            } else {
-                bubbleShape.setColor(Color.parseColor("#FFFFFF"))
-            }
+            if (isMe) bubbleShape.setColor(Color.parseColor("#DCF8C6")) else bubbleShape.setColor(Color.parseColor("#FFFFFF"))
 
             val bubbleLayout = LinearLayout(this)
             bubbleLayout.orientation = LinearLayout.VERTICAL
@@ -580,47 +505,64 @@ class MainActivity : AppCompatActivity() {
                 bubbleLayout.addView(deviceText)
             }
 
-                        if (msg.driveFileId != null && msg.fileType != null) {
-    val decryptedFileId = decryptMessage(msg.driveFileId)
-    val fileName = msg.fileName ?: "attachment"
-    
-    val attachmentContainer = LinearLayout(this)
-    attachmentContainer.orientation = LinearLayout.HORIZONTAL
-    attachmentContainer.gravity = Gravity.CENTER_VERTICAL
-    attachmentContainer.setPadding(0, 8, 0, 16)
+            // --- NEW MEDIA HANDLING UI ---
+            if (msg.driveFileId != null && msg.fileType != null) {
+                val decryptedFileId = decryptMessage(msg.driveFileId)
+                val fileName = msg.fileName ?: "attachment"
+                
+                if (msg.fileType.startsWith("image/")) {
+                    // It's an image, let's show a thumbnail!
+                    val thumbnailView = ImageView(this)
+                    val params = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        500 // Height of thumbnail in pixels
+                    )
+                    params.setMargins(0, 8, 0, 16)
+                    thumbnailView.layoutParams = params
+                    thumbnailView.scaleType = ImageView.ScaleType.CENTER_CROP
+                    thumbnailView.setBackgroundColor(Color.parseColor("#DDDDDD")) // Loading placeholder
+                    
+                    // Click to view full image
+                    thumbnailView.setOnClickListener {
+                        triggerDownload(decryptedFileId, fileName, msg.fileType)
+                    }
+                    bubbleLayout.addView(thumbnailView)
 
-    val iconRes = if (msg.fileType.startsWith("image/")) 
-        android.R.drawable.ic_menu_gallery 
-    else 
-        android.R.drawable.ic_menu_save
-        
-    val downloadIcon = ImageView(this)
-    downloadIcon.setImageResource(iconRes)
-    downloadIcon.setColorFilter(Color.parseColor("#075E54"))
-    val iconParams = LinearLayout.LayoutParams(48, 48)
-    iconParams.setMargins(0, 0, 16, 0)
-    downloadIcon.layoutParams = iconParams
+                    // Ask MediaManager to load the image quietly in the background
+                    CoroutineScope(Dispatchers.IO).launch {
+                        mediaManager.loadThumbnail(decryptedFileId, fileName, thumbnailView)
+                    }
+                } else {
+                    // Standard File Attachment (PDF, ZIP, etc)
+                    val attachmentContainer = LinearLayout(this)
+                    attachmentContainer.orientation = LinearLayout.HORIZONTAL
+                    attachmentContainer.gravity = Gravity.CENTER_VERTICAL
+                    attachmentContainer.setPadding(0, 8, 0, 16)
 
-    val attachmentText = TextView(this)
-    attachmentText.text = if (msg.fileType.startsWith("image/")) 
-        "📷 $fileName" 
-    else 
-        "📎 $fileName"
-    attachmentText.textSize = 14f
-    attachmentText.setTextColor(Color.parseColor("#075E54"))
+                    val downloadIcon = ImageView(this)
+                    downloadIcon.setImageResource(android.R.drawable.ic_menu_save)
+                    downloadIcon.setColorFilter(Color.parseColor("#075E54"))
+                    val iconParams = LinearLayout.LayoutParams(48, 48)
+                    iconParams.setMargins(0, 0, 16, 0)
+                    downloadIcon.layoutParams = iconParams
 
-    attachmentContainer.addView(downloadIcon)
-    attachmentContainer.addView(attachmentText)
-    
-    attachmentContainer.setOnClickListener {
-        triggerDownload(decryptedFileId, fileName, msg.fileType)
-    }
-    
-    bubbleLayout.addView(attachmentContainer)
-}
+                    val attachmentText = TextView(this)
+                    attachmentText.text = "📎 $fileName"
+                    attachmentText.textSize = 14f
+                    attachmentText.setTextColor(Color.parseColor("#075E54"))
+
+                    attachmentContainer.addView(downloadIcon)
+                    attachmentContainer.addView(attachmentText)
+                    
+                    attachmentContainer.setOnClickListener {
+                        triggerDownload(decryptedFileId, fileName, msg.fileType)
+                    }
+                    bubbleLayout.addView(attachmentContainer)
+                }
+            }
+            // -------------------------------
 
             val decryptedText = decryptMessage(msg.message)
-
             val messageView = TextView(this)
             messageView.textSize = 16f
             messageView.setTextColor(Color.BLACK)
