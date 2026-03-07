@@ -51,7 +51,6 @@ import okio.Okio
 import okio.Sink
 import okio.buffer
 import android.view.inputmethod.InputMethodManager
-import android.view.inputmethod.InputMethodManager
 import android.app.AlertDialog
 import android.content.DialogInterface
 data class ChatMessage(
