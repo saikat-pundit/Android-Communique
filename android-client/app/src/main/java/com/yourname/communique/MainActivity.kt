@@ -82,8 +82,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var searchPositionText: TextView
     private lateinit var searchIndicatorLayout: LinearLayout
     private lateinit var messageInput: EditText
-    
-    // NEW: Initialize MediaManager
+    private var currentGroupName: String? = null
+    private lateinit var groupOverlay: FrameLayout
     private lateinit var mediaManager: MediaManager
 
     private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
@@ -135,7 +135,29 @@ class MainActivity : AppCompatActivity() {
 
         chatMessageContainer = findViewById(R.id.chatMessageContainer)
         chatScrollView = findViewById(R.id.chatScrollView)
+        // --- NEW: Dynamic Group Overlay & Back Button ---
+        groupOverlay = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            visibility = View.GONE
+            elevation = 100f
+            setBackgroundColor(Color.WHITE)
+        }
+        addContentView(groupOverlay, groupOverlay.layoutParams)
 
+        val backButton = Button(this).apply {
+            text = "⬅"
+            textSize = 20f
+            setBackgroundColor(Color.TRANSPARENT)
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            setOnClickListener {
+                currentGroupName = null
+                chatLayout.visibility = View.GONE
+                showGroupScreen()
+            }
+        }
+        (userCountText.parent as LinearLayout).addView(backButton, 0) // Injects into Chat Header
+        // ------------------------------------------------
         detectedDeviceText.text = "Device Name: $currentDeviceName"
 
         try { Glide.with(this).asGif().load(R.drawable.login).into(gifImageView) } catch (e: Exception) {}
@@ -152,10 +174,9 @@ class MainActivity : AppCompatActivity() {
             if (pinInput.text.toString() == "3142") {
                 loginLayout.animate().alpha(0f).setDuration(500).withEndAction {
                     loginLayout.visibility = View.GONE
-                    chatLayout.visibility = View.VISIBLE
-                    chatLayout.animate().alpha(1f).setDuration(600).start()
                     isPolling = true
                     startPollingGist()
+                    showGroupScreen()
                 }.start()
             } else {
                 Toast.makeText(this, "Incorrect App Lock PIN", Toast.LENGTH_SHORT).show()
@@ -208,7 +229,29 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-
+    private fun showGroupScreen() {
+        groupOverlay.removeAllViews()
+        val screen = GroupUIHelper.buildGroupScreen(
+            context = this,
+            chatHistory = chatHistory,
+            onGroupSelected = { groupName ->
+                currentGroupName = groupName
+                groupOverlay.visibility = View.GONE
+                chatLayout.visibility = View.VISIBLE
+                updateChatUI()
+                updateUserCount()
+            },
+            onGroupCreated = { newGroupName ->
+                currentGroupName = newGroupName
+                groupOverlay.visibility = View.GONE
+                chatLayout.visibility = View.VISIBLE
+                // Instantly register the group in the Gist by sending a system message
+                sendMessage("Created group: $newGroupName", null, null, null) 
+            }
+        )
+        groupOverlay.addView(screen)
+        groupOverlay.visibility = View.VISIBLE
+    }
     private fun sendMessage(rawText: String, driveFileId: String? = null, fileType: String? = null, fileName: String? = null) {
         val encryptedText = CryptoHelper.encrypt(rawText)
         val encryptedFileId = driveFileId?.let { CryptoHelper.encrypt(it) }
@@ -217,7 +260,7 @@ class MainActivity : AppCompatActivity() {
         val encryptedReplyDevice = replyingToDevice?.let { CryptoHelper.encrypt(it) }
         val encryptedReplyText = replyingToText?.let { CryptoHelper.encrypt(it) }
         
-        val newMessage = ChatMessage(currentDeviceName, encryptedText, System.currentTimeMillis(), encryptedFileId, fileType, fileName, encryptedReplyDevice, encryptedReplyText)
+        val newMessage = ChatMessage(currentDeviceName, encryptedText, System.currentTimeMillis(), encryptedFileId, fileType, fileName, encryptedReplyDevice, encryptedReplyText, currentGroupName ?: "Personal Chat")
         chatHistory.add(newMessage)
         
         // Reset the reply state and UI
@@ -477,17 +520,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateUserCount() {
-        ChatUIHelper.updateUserCountBar(this, userCountText, chatHistory)
+        val groupHistory = chatHistory.filter { (it.groupName ?: "Personal Chat") == (currentGroupName ?: "Personal Chat") }
+        ChatUIHelper.updateUserCountBar(this, userCountText, groupHistory, currentDeviceName)
     }
 
     private fun updateChatUI() {
         chatMessageContainer.removeAllViews()
-
-        // Identify the last 2 images for auto-download
-        val imageIndices = chatHistory.indices.filter { chatHistory[it].fileType?.startsWith("image/") == true }
+        val groupHistory = chatHistory.filter { (it.groupName ?: "Personal Chat") == (currentGroupName ?: "Personal Chat") }
+        val imageIndices = groupHistory.indices.filter { groupHistory[it].fileType?.startsWith("image/") == true }
         val autoDownloadIndices = imageIndices.takeLast(2)
-
-        for ((index, msg) in chatHistory.withIndex()) {
+        for ((index, msg) in groupHistory.withIndex()) {
             val decryptedText = CryptoHelper.decrypt(msg.message)
             val decryptedFileId = msg.driveFileId?.let { CryptoHelper.decrypt(it) }
             val isFocusedMatch = searchMatchIndices.isNotEmpty() && currentSearchIndex >= 0 && searchMatchIndices[currentSearchIndex] == index
