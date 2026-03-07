@@ -57,8 +57,9 @@ data class ChatMessage(
     val driveFileId: String? = null, 
     val fileType: String? = null, 
     val fileName: String? = null,
-    val replyToDevice: String? = null, // NEW: Who are we quoting?
-    val replyToText: String? = null    // NEW: What did they say?
+    val replyToDevice: String? = null,
+    val replyToText: String? = null,
+    val groupName: String? = null
 )
 class MainActivity : AppCompatActivity() {
 
