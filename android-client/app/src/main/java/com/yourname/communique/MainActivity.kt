@@ -178,6 +178,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, 0, 4, 6) // Nudges the ❮ symbol perfectly into the center of the circle
             
             setOnClickListener {
+                currentGroupName?.let { markGroupAsRead(it) }
                 currentGroupName = null
                 chatLayout.visibility = View.GONE
                 showGroupScreen()
