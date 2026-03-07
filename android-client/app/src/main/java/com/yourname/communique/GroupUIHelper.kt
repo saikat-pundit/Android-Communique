@@ -15,9 +15,11 @@ object GroupUIHelper {
     fun buildGroupScreen(
         context: Context,
         chatHistory: List<ChatMessage>,
-        unreadCounts: Map<String, Int>, // <--- ADD THIS LINE
+        unreadCounts: Map<String, Int>, 
         onGroupSelected: (String) -> Unit,
-        onGroupCreated: (String) -> Unit
+        onGroupCreated: (String) -> Unit,
+        onGroupRename: (String, String) -> Unit, // <--- ADD THIS
+        onGroupDelete: (String) -> Unit          // <--- ADD THIS
     ): LinearLayout {
         val mainLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -120,6 +122,70 @@ object GroupUIHelper {
                     isClickable = true
                     isFocusable = true
                     setOnClickListener { onGroupSelected(group) }
+                    // --- NEW: LONG PRESS TO RENAME OR DELETE ---
+                    if (group != "Personal Chat") { // Protect the main chat from deletion
+                        setOnLongClickListener {
+                            val optionsDialog = AlertDialog.Builder(context).create()
+                            val optionsLayout = LinearLayout(context).apply {
+                                orientation = LinearLayout.VERTICAL
+                                setPadding(40, 40, 40, 40)
+                                background = GradientDrawable().apply {
+                                    setColor(Color.WHITE)
+                                    cornerRadius = 32f
+                                }
+                            }
+                            
+                            val titleText = TextView(context).apply {
+                                text = "Group Options"
+                                textSize = 20f
+                                setTypeface(null, Typeface.BOLD)
+                                setPadding(0, 0, 0, 30)
+                            }
+                            optionsLayout.addView(titleText)
+                            
+                            // Rename Button
+                            val renameBtn = TextView(context).apply {
+                                text = "✏️ Rename Group"
+                                textSize = 18f
+                                setPadding(20, 30, 20, 30)
+                                setOnClickListener {
+                                    optionsDialog.dismiss()
+                                    val input = EditText(context).apply { setText(group) }
+                                    AlertDialog.Builder(context)
+                                        .setTitle("Rename Group")
+                                        .setView(input)
+                                        .setPositiveButton("Save") { _, _ ->
+                                            val newName = input.text.toString().trim()
+                                            if (newName.isNotEmpty() && newName != group) {
+                                                onGroupRename(group, newName)
+                                            }
+                                        }
+                                        .setNegativeButton("Cancel", null)
+                                        .show()
+                                }
+                            }
+                            optionsLayout.addView(renameBtn)
+                            
+                            // Delete Button
+                            val deleteBtn = TextView(context).apply {
+                                text = "🗑️ Delete Group"
+                                textSize = 18f
+                                setTextColor(Color.RED)
+                                setPadding(20, 30, 20, 30)
+                                setOnClickListener {
+                                    optionsDialog.dismiss()
+                                    onGroupDelete(group)
+                                }
+                            }
+                            optionsLayout.addView(deleteBtn)
+                            
+                            optionsDialog.setView(optionsLayout)
+                            optionsDialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+                            optionsDialog.show()
+                            
+                            true // Consume the long click
+                        }
+                    }
                 }
 
                 val groupNameText = TextView(context).apply {
