@@ -37,12 +37,100 @@ object ChatUIHelper {
         userCountText.text = "$count users ($displayNames)"
 
         // Open Modal on Click
+        // Open Modal on Click using a custom modern UI
         userCountText.setOnClickListener {
-            AlertDialog.Builder(context)
-                .setTitle("Connected Users")
-                .setItems(users.toTypedArray(), null)
-                .setPositiveButton("Close", null)
-                .show()
+            val dialog = AlertDialog.Builder(context).create()
+
+            // 1. The Main Rounded Card Background
+            val dialogView = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(60, 60, 60, 60)
+                background = GradientDrawable().apply {
+                    setColor(Color.WHITE)
+                    cornerRadius = 48f // Sleek rounded corners just like the web image!
+                }
+            }
+            val headerLayout = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            }
+
+            val titleText = TextView(context).apply {
+                text = "👥 Connected Users"
+                textSize = 18f
+                setTextColor(Color.parseColor("#075E54"))
+                setTypeface(null, Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+
+            val closeBtn = TextView(context).apply {
+                text = "✖"
+                textSize = 20f
+                setTextColor(Color.GRAY)
+                setTypeface(null, Typeface.BOLD)
+                setPadding(20, 0, 0, 0)
+                setOnClickListener { dialog.dismiss() } // Click X to close
+            }
+
+            headerLayout.addView(titleText)
+            headerLayout.addView(closeBtn)
+            dialogView.addView(headerLayout)
+            val headerDivider = View(context).apply {
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 2).apply {
+                    setMargins(0, 30, 0, 10)
+                }
+                setBackgroundColor(Color.parseColor("#E0E0E0"))
+            }
+            dialogView.addView(headerDivider)
+            val scrollView = ScrollView(context).apply {
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            }
+            
+            val listLayout = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            displayUsers.forEach { user ->
+                val isMe = user.endsWith("(You)")
+
+                val itemLayout = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, 30, 0, 30)
+                }
+
+                // Native user icon
+                val iconLabel = TextView(context).apply {
+                    text = if (isMe) "🟢" else "👤" // Distinct native icon to separate "You" from others
+                    textSize = 18f
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        setMargins(0, 0, 30, 0)
+                    }
+                }
+
+                val nameText = TextView(context).apply {
+                    text = user
+                    textSize = 15f
+                    setTextColor(Color.BLACK)
+                    if (isMe) setTypeface(null, Typeface.BOLD)
+                }
+
+                itemLayout.addView(iconLabel)
+                itemLayout.addView(nameText)
+                listLayout.addView(itemLayout)
+                val itemDivider = View(context).apply {
+                    layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 2)
+                    setBackgroundColor(Color.parseColor("#F5F5F5"))
+                }
+                listLayout.addView(itemDivider)
+            }
+
+            scrollView.addView(listLayout)
+            dialogView.addView(scrollView)
+
+            dialog.setView(dialogView)
+            dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+            dialog.show()
         }
     }
 
