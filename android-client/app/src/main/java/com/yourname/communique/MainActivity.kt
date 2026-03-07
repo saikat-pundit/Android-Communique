@@ -563,7 +563,7 @@ class ProgressRequestBody(
                 }
             }
         }
-        val bufferedSink = Okio.buffer(countingSink)
+        val bufferedSink = countingSink.buffer()
         requestBody.writeTo(bufferedSink)
         bufferedSink.flush()
     }
