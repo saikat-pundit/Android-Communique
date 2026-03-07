@@ -470,7 +470,7 @@ class MainActivity : AppCompatActivity() {
                     isFirstLoad = false
                     CoroutineScope(Dispatchers.Main).launch { updateUserCount() }
                 }
-                delay(3000)
+                delay(5000)
             }
         }
     }
