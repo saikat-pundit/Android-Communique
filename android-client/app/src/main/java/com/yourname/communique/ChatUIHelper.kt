@@ -19,11 +19,11 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
+import android.view.View
+import android.widget.ScrollView
 object ChatUIHelper {
 
-    // FEATURE 3: Top Bar User Names and Modal Popup
-    fun updateUserCountBar(context: Context, userCountText: TextView, chatHistory: List<ChatMessage>) {
+    fun updateUserCountBar(context: Context, userCountText: TextView, chatHistory: List<ChatMessage>, currentDeviceName: String) {
         val users = chatHistory.map { it.device }.distinct()
         val count = users.size
         
@@ -32,8 +32,11 @@ object ChatUIHelper {
             return
         }
 
+        // NEW: Map the list to append "(You)" to the current device
+        val displayUsers = users.map { if (it == currentDeviceName) "$it (You)" else it }
+
         // Show "3 users (Phone A, Phone B...)"
-        val displayNames = users.take(2).joinToString(", ") + if (count > 2) "..." else ""
+        val displayNames = displayUsers.take(2).joinToString(", ") + if (count > 2) "..." else ""
         userCountText.text = "$count users ($displayNames)"
 
         // Open Modal on Click
