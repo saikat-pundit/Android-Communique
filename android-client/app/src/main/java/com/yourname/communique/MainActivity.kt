@@ -145,12 +145,26 @@ class MainActivity : AppCompatActivity() {
         }
         addContentView(groupOverlay, groupOverlay.layoutParams)
 
-        val backButton = Button(this).apply {
-            text = "⬅"
-            textSize = 20f
-            setBackgroundColor(Color.TRANSPARENT)
+        val backButton = TextView(this).apply {
+            text = "❮" // Looks identical to a fa-angle-left icon
+            textSize = 22f
+            gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            setTypeface(null, Typeface.BOLD)
+            
+            // Create the circular background
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#0B7065")) // Darker green to pop against the header
+            }
+            
+            // Size and padding for the circle
+            val size = 110 
+            layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                setMargins(0, 0, 32, 0) // Margin pushes it away from the text
+            }
+            setPadding(0, 0, 4, 6) // Nudges the ❮ symbol perfectly into the center of the circle
+            
             setOnClickListener {
                 currentGroupName = null
                 chatLayout.visibility = View.GONE
