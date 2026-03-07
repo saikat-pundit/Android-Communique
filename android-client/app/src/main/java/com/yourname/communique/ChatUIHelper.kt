@@ -28,19 +28,38 @@ object ChatUIHelper {
         val users = chatHistory.map { it.device }.distinct()
         val count = users.size
         
+        // Force the TextView to allow multiple lines
+        userCountText.isSingleLine = false
+        
         if (count == 0) {
-            userCountText.text = "$currentGroupName | 0 users"
+            userCountText.text = "$currentGroupName\n0 users"
             return
         }
 
-        // Map the list to append "(You)" to the current device
+        // 1. Array for the Top Bar Header (NO "You")
+        val topBarNames = users.take(2).joinToString(", ") + if (count > 2) "..." else ""
+        
+        // 2. Array for the Modal Popup (INCLUDES "You")
         val displayUsers = users.map { if (it == currentDeviceName) "$it (You)" else it }
 
-        // Show Group Name and Users: "Family | 3 users (Phone A, Phone B...)"
-        val displayNames = displayUsers.take(2).joinToString(", ") + if (count > 2) "..." else ""
-        userCountText.text = "$currentGroupName | $count users ($displayNames)"
+        // --- NEW: Two-Line Header Formatting ---
+        val line1 = currentGroupName
+        val line2 = "$count users ($topBarNames)"
+        val fullText = "$line1\n$line2"
+        
+        val spannable = SpannableString(fullText)
+        
+        // Style Line 1: Larger and Bold
+        spannable.setSpan(android.text.style.AbsoluteSizeSpan(18, true), 0, line1.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        spannable.setSpan(android.text.style.StyleSpan(Typeface.BOLD), 0, line1.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        
+        // Style Line 2: Smaller and slight grey tint
+        spannable.setSpan(android.text.style.AbsoluteSizeSpan(12, true), line1.length + 1, fullText.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        spannable.setSpan(ForegroundColorSpan(Color.parseColor("#D0D0D0")), line1.length + 1, fullText.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        
+        userCountText.text = spannable
+        // ----------------------------------------
 
-        // Open Modal on Click
         // Open Modal on Click using a custom modern UI
         userCountText.setOnClickListener {
             val dialog = AlertDialog.Builder(context).create()
