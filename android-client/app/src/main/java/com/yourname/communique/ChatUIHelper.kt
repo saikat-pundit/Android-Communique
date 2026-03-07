@@ -23,21 +23,22 @@ import android.view.View
 import android.widget.ScrollView
 object ChatUIHelper {
 
-    fun updateUserCountBar(context: Context, userCountText: TextView, chatHistory: List<ChatMessage>, currentDeviceName: String) {
+    // We added 'currentGroupName: String' to the end of the arguments here
+    fun updateUserCountBar(context: Context, userCountText: TextView, chatHistory: List<ChatMessage>, currentDeviceName: String, currentGroupName: String) {
         val users = chatHistory.map { it.device }.distinct()
         val count = users.size
         
         if (count == 0) {
-            userCountText.text = "0 users"
+            userCountText.text = "$currentGroupName | 0 users"
             return
         }
 
-        // NEW: Map the list to append "(You)" to the current device
+        // Map the list to append "(You)" to the current device
         val displayUsers = users.map { if (it == currentDeviceName) "$it (You)" else it }
 
-        // Show "3 users (Phone A, Phone B...)"
+        // Show Group Name and Users: "Family | 3 users (Phone A, Phone B...)"
         val displayNames = displayUsers.take(2).joinToString(", ") + if (count > 2) "..." else ""
-        userCountText.text = "$count users ($displayNames)"
+        userCountText.text = "$currentGroupName | $count users ($displayNames)"
 
         // Open Modal on Click
         // Open Modal on Click using a custom modern UI
