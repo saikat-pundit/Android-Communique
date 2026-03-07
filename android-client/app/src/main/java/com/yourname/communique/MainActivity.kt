@@ -51,6 +51,9 @@ import okio.Okio
 import okio.Sink
 import okio.buffer
 import android.view.inputmethod.InputMethodManager
+import android.view.inputmethod.InputMethodManager
+import android.app.AlertDialog
+import android.content.DialogInterface
 data class ChatMessage(
     val device: String, 
     val message: String, 
@@ -326,11 +329,12 @@ class MainActivity : AppCompatActivity() {
                 showGroupScreen() // Refresh the UI
             },
             // --- NEW: DELETE LOGIC ---
+            // --- NEW: DELETE LOGIC ---
             onGroupDelete = { groupToDelete ->
                 AlertDialog.Builder(this)
                     .setTitle("Delete Group?")
                     .setMessage("Do you want to delete '$groupToDelete' and ALL its messages permanently?")
-                    .setPositiveButton("Yes") { _, _ ->
+                    .setPositiveButton("Yes") { dialog, _ ->  // <--- FIXED: Explicitly named 'dialog'
                         
                         // Security PIN Prompt
                         val pinInput = EditText(this).apply { 
@@ -342,7 +346,7 @@ class MainActivity : AppCompatActivity() {
                         AlertDialog.Builder(this)
                             .setTitle("Authentication Required")
                             .setView(pinInput)
-                            .setPositiveButton("Confirm") { _, _ ->
+                            .setPositiveButton("Confirm") { innerDialog, _ -> // <--- FIXED: Explicitly named 'innerDialog'
                                 if (pinInput.text.toString() == "3142") {
                                     // PIN correct: Wipe the group from the array
                                     chatHistory.removeAll { (it.groupName ?: "Personal Chat") == groupToDelete }
