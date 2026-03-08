@@ -24,7 +24,7 @@ object GroupUIHelper {
         val mainLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT)
-            setBackgroundColor(Color.parseColor("#E5DDD5"))
+            setBackgroundResource(R.drawable.group)
             setPadding(40, 80, 40, 40)
         }
 
