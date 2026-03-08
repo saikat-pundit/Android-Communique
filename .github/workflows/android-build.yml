@@ -32,7 +32,7 @@ jobs:
         cp android-client/logo.png android-client/app/src/main/res/drawable/logo.png 2>/dev/null || :
         cp android-client/login.gif android-client/app/src/main/res/drawable/login.gif 2>/dev/null || :
         cp android-client/wallpaper.png android-client/app/src/main/res/drawable/wallpaper.png 2>/dev/null || :
-
+        cp android-client/group.png android-client/app/src/main/res/drawable/group.png 2>/dev/null || :
     # Stripped out verbose logging and forced the build to fail properly if there is an error
     - name: Build Debug APK
       run: |
