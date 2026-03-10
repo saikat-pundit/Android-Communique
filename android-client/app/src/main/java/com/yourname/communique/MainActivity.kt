@@ -539,9 +539,9 @@ class MainActivity : AppCompatActivity() {
         }
         if (currentSearchQuery.isEmpty()) chatScrollView.post { chatScrollView.smoothScrollTo(0, chatMessageContainer.bottom) }
     }
-}
+} // <--- THIS BRACE CLOSES MAINACTIVITY
 
-// PROGRESS REQUEST BODY CLASS
+// PROGRESS REQUEST BODY CLASS (ONLY ONE COPY, OUTSIDE THE CLASS)
 class ProgressRequestBody(private val rb: RequestBody, private val onProgress: (Int) -> Unit) : RequestBody() {
     override fun contentType() = rb.contentType()
     override fun contentLength() = rb.contentLength()
@@ -551,13 +551,17 @@ class ProgressRequestBody(private val rb: RequestBody, private val onProgress: (
             override fun write(source: Buffer, byteCount: Long) {
                 super.write(source, byteCount)
                 bytesWritten += byteCount
-                onProgress(((bytesWritten.toFloat() / contentLength().toFloat()) * 100).toInt())
+                val total = contentLength()
+                if (total > 0) {
+                    onProgress(((bytesWritten.toFloat() / total.toFloat()) * 100).toInt())
+                }
             }
         }
         val bufferedSink = countingSink.buffer()
         rb.writeTo(bufferedSink)
         bufferedSink.flush()
     }
+}
 // The class below should be OUTSIDE the MainActivity class
 class ProgressRequestBody(private val rb: RequestBody, private val onProgress: (Int) -> Unit) : RequestBody() {
     override fun contentType() = rb.contentType()
