@@ -387,7 +387,7 @@ class MainActivity : AppCompatActivity() {
         // FIX: Fetch the absolute latest state before pushing to prevent ghost resurrections!
         CoroutineScope(Dispatchers.IO).launch {
             val latestHistory = networkHelper.fetchChatHistory()
-            if (latestHistory != null) {
+            if (!latestHistory.isNullOrEmpty())
                 chatHistory.clear()
                 chatHistory.addAll(latestHistory)
             }
@@ -619,57 +619,65 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startPollingGist() {
-        CoroutineScope(Dispatchers.IO).launch {
-            while (isPolling) {
-                val fetchedHistory = networkHelper.fetchChatHistory()
+    CoroutineScope(Dispatchers.IO).launch {
+        while (isPolling) {
+            val fetchedHistory = networkHelper.fetchChatHistory()
+            
+            // 1. Only proceed if we actually got data
+            if (fetchedHistory != null) {
                 
-                // FIX: Check if lists are DIFFERENT (handles deletions!), not just larger
-                if (fetchedHistory != null && fetchedHistory != chatHistory) {
+                // 2. Use size and last message timestamp as a cheaper, safer "change" check
+                val hasChanged = fetchedHistory.size != chatHistory.size || 
+                                 (fetchedHistory.lastOrNull()?.timestamp != chatHistory.lastOrNull()?.timestamp)
+
+                if (hasChanged || isFirstLoad) {
                     val isNewMessageAdded = fetchedHistory.size > chatHistory.size
                     val lastMessage = fetchedHistory.lastOrNull()
                     val isMe = lastMessage?.device == currentDeviceName
 
+                    // Update the local list
                     chatHistory.clear()
                     chatHistory.addAll(fetchedHistory)
                     saveCacheAndReadState()
-                    
-                    CoroutineScope(Dispatchers.Main).launch {
-                        if (currentGroupName == null) {
-                            showGroupScreen() // Refresh the group list
-                        } else {
-                            // If you are inside a group that someone else just deleted, kick back to home!
-                            val groupStillExists = chatHistory.any { (it.groupName ?: "Personal Chat") == currentGroupName } || currentGroupName == "Personal Chat"
-                            if (!groupStillExists) {
-                                currentGroupName = null
-                                chatLayout.visibility = View.GONE
-                                showGroupScreen()
-                                Toast.makeText(this@MainActivity, "This group was deleted by another user.", Toast.LENGTH_LONG).show()
+
+                    // 3. Switch to Main thread SAFELY
+                    withContext(Dispatchers.Main) {
+                        // Check if the activity is still alive to prevent "Context destroyed" crashes
+                        if (!isFinishing && !isDestroyed) {
+                            
+                            if (currentGroupName == null) {
+                                // Only refresh if the group overlay is actually visible
+                                if (groupOverlay.visibility == View.VISIBLE || isFirstLoad) {
+                                    showGroupScreen()
+                                }
                             } else {
-                                updateChatUI()
-                                updateUserCount()
+                                val groupStillExists = chatHistory.any { (it.groupName ?: "Personal Chat") == currentGroupName } || currentGroupName == "Personal Chat"
+                                
+                                if (!groupStillExists) {
+                                    currentGroupName = null
+                                    chatLayout.visibility = View.GONE
+                                    showGroupScreen()
+                                    Toast.makeText(this@MainActivity, "Group no longer exists", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    updateChatUI()
+                                    updateUserCount()
+                                }
+                            }
+
+                            // 4. Handle notifications
+                            if (!isFirstLoad && !isMe && isNewMessageAdded && lastMessage != null) {
+                                playNotificationSound()
+                                showNotification(lastMessage.device, CryptoHelper.decrypt(lastMessage.message))
                             }
                         }
-                        
-                        // Only play sound if a NEW message was ADDED (not for deletions!)
-                        if (!isFirstLoad && !isMe && isNewMessageAdded && lastMessage != null) {
-                            playNotificationSound()
-                            showNotification(lastMessage.device, CryptoHelper.decrypt(lastMessage.message))
-                        }
-                        isFirstLoad = false
                     }
-                } else if (isFirstLoad && fetchedHistory != null) {
                     isFirstLoad = false
-                    chatHistory.clear()
-                    chatHistory.addAll(fetchedHistory)
-                    saveCacheAndReadState()
-                    CoroutineScope(Dispatchers.Main).launch {
-                        if (currentGroupName == null) showGroupScreen() else { updateChatUI(); updateUserCount() }
-                    }
                 }
-                delay(5000)
             }
+            delay(5000)
         }
     }
+}
 
     private fun updateUserCount() {
         val group = currentGroupName ?: "Personal Chat"
