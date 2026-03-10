@@ -105,9 +105,8 @@ object GroupUIHelper {
         fun renderList(query: String) {
             listLayout.removeAllViews()
             val filtered = allGroups.filter { it.contains(query, ignoreCase = true) }
-            
             filtered.forEach { group ->
-                // Use a horizontal layout instead of a basic button so we can add the badge
+                val unread = unreadCounts[group] ?: 0
                 val groupContainer = LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
