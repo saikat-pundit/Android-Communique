@@ -6,10 +6,13 @@ import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
 object CryptoHelper {
+    fun getSecret(scrambled: String): String {
+        return String(Base64.decode(scrambled, Base64.DEFAULT), Charsets.UTF_8)
+    }
 
     private fun getSecretKey(): SecretKeySpec {
         val digest = MessageDigest.getInstance("SHA-256")
-        val keyBytes = digest.digest(BuildConfig.ENCRYPTION_KEY.toByteArray(Charsets.UTF_8))
+        val keyBytes = digest.digest(getSecret(BuildConfig.ENCRYPTION_KEY).toByteArray(Charsets.UTF_8))
         return SecretKeySpec(keyBytes, "AES")
     }
 
