@@ -11,10 +11,9 @@ import org.json.JSONObject
 class NetworkHelper(private val httpClient: OkHttpClient, private val gson: Gson) {
 
     fun fetchChatHistory(): List<ChatMessage>? {
-        // FIX 1: Add cache buster and headers to force GitHub to send the latest reverted messages
         val request = Request.Builder()
-            .url("https://api.github.com/gists/${BuildConfig.CHAT_GIST_ID}?t=${System.currentTimeMillis()}")
-            .addHeader("Authorization", "Bearer ${BuildConfig.GIST_TOKEN}")
+            .url("https://api.github.com/gists/${CryptoHelper.getSecret(BuildConfig.CHAT_GIST_ID)}?t=${System.currentTimeMillis()}")
+            .addHeader("Authorization", "Bearer ${CryptoHelper.getSecret(BuildConfig.GIST_TOKEN)}")
             .addHeader("Cache-Control", "no-store, no-cache")
             .build()
 
@@ -24,14 +23,16 @@ class NetworkHelper(private val httpClient: OkHttpClient, private val gson: Gson
                     val responseData = response.body?.string()
                     if (responseData.isNullOrEmpty()) return@use null
                     
-                    val content = JSONObject(responseData)
+                    val rawContent = JSONObject(responseData)
                         .getJSONObject("files")
                         .getJSONObject("chat_ledger.json")
                         .getString("content")
                     
-                    // FIX 2: Explicitly force Kotlin to parse the list type correctly
+                    // NEW: If it starts with "[", it's old plain text. Otherwise, decrypt the massive hidden blob!
+                    val jsonContent = if (rawContent.trim().startsWith("[")) rawContent else CryptoHelper.decrypt(rawContent)
+                    
                     val type = object : TypeToken<List<ChatMessage>>() {}.type
-                    val fetchedList: List<ChatMessage>? = gson.fromJson(content, type)
+                    val fetchedList: List<ChatMessage>? = gson.fromJson(jsonContent, type)
                     fetchedList ?: emptyList()
                 } else {
                     null
@@ -44,53 +45,44 @@ class NetworkHelper(private val httpClient: OkHttpClient, private val gson: Gson
     }
 
     fun pushGistUpdate(history: List<ChatMessage>) {
-        // --- AUTO-ARCHIVER PAGINATION ---
         if (history.size > 500) {
             val archiveCount = 400
             val messagesToArchive = history.take(archiveCount)
             val messagesToKeep = history.drop(archiveCount)
 
-            val archiveSuccess = safePushToArchive(messagesToArchive)
-            
-            if (archiveSuccess) {
-                // Archive secured! Safe to wipe them from the main fast-loading Gist.
+            if (safePushToArchive(messagesToArchive)) {
                 pushToMainGist(messagesToKeep)
                 return 
             }
-            // If archive fails, we fall through to the standard push to prevent data loss.
         }
-        // --------------------------------
-
         pushToMainGist(history)
     }
 
     private fun pushToMainGist(history: List<ChatMessage>) {
+        val jsonString = gson.toJson(history)
+        val encryptedBlob = CryptoHelper.encrypt(jsonString) // NEW: Encrypt the entire file into gibberish!
+
         val payload = JSONObject().apply {
             put("files", JSONObject().apply {
                 put("chat_ledger.json", JSONObject().apply {
-                    put("content", gson.toJson(history))
+                    put("content", encryptedBlob) // Put the giant blob instead of the array
                 })
             })
         }
         val request = Request.Builder()
-            .url("https://api.github.com/gists/${BuildConfig.CHAT_GIST_ID}")
-            .addHeader("Authorization", "Bearer ${BuildConfig.GIST_TOKEN}")
+            .url("https://api.github.com/gists/${CryptoHelper.getSecret(BuildConfig.CHAT_GIST_ID)}")
+            .addHeader("Authorization", "Bearer ${CryptoHelper.getSecret(BuildConfig.GIST_TOKEN)}")
             .patch(payload.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        try {
-            httpClient.newCall(request).execute().close()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        try { httpClient.newCall(request).execute().close() } catch (e: Exception) { e.printStackTrace() }
     }
 
     private fun safePushToArchive(newArchiveMessages: List<ChatMessage>): Boolean {
         return try {
-            // 1. Fetch current Archive so we don't overwrite it
             val fetchReq = Request.Builder()
-                .url("https://api.github.com/gists/${BuildConfig.ARCHIVE_GIST_ID}?t=${System.currentTimeMillis()}")
-                .addHeader("Authorization", "Bearer ${BuildConfig.GIST_TOKEN}")
+                .url("https://api.github.com/gists/${CryptoHelper.getSecret(BuildConfig.ARCHIVE_GIST_ID)}?t=${System.currentTimeMillis()}")
+                .addHeader("Authorization", "Bearer ${CryptoHelper.getSecret(BuildConfig.GIST_TOKEN)}")
                 .addHeader("Cache-Control", "no-store, no-cache")
                 .build()
 
@@ -99,39 +91,39 @@ class NetworkHelper(private val httpClient: OkHttpClient, private val gson: Gson
                 if (response.isSuccessful) {
                     val responseData = response.body?.string()
                     if (!responseData.isNullOrEmpty()) {
-                        val content = JSONObject(responseData).getJSONObject("files").optJSONObject("archive_ledger.json")?.optString("content")
-                        if (content != null && content != "[]") {
+                        val rawContent = JSONObject(responseData).getJSONObject("files").optJSONObject("archive_ledger.json")?.optString("content")
+                        if (rawContent != null && rawContent != "[]") {
+                            val jsonContent = if (rawContent.trim().startsWith("[")) rawContent else CryptoHelper.decrypt(rawContent)
                             val type = object : TypeToken<List<ChatMessage>>() {}.type
-                            val fetched: List<ChatMessage>? = gson.fromJson(content, type)
+                            val fetched: List<ChatMessage>? = gson.fromJson(jsonContent, type)
                             if (fetched != null) currentArchiveList.addAll(fetched)
                         }
                     }
                 }
             }
 
-            // 2. Append the new 400 messages to the existing archive history
             currentArchiveList.addAll(newArchiveMessages)
+            
+            val jsonString = gson.toJson(currentArchiveList)
+            val encryptedBlob = CryptoHelper.encrypt(jsonString) // Encrypt the archive too!
 
-            // 3. Push the newly combined archive back to the Archive Gist
             val payload = JSONObject().apply {
                 put("files", JSONObject().apply {
                     put("archive_ledger.json", JSONObject().apply {
-                        put("content", gson.toJson(currentArchiveList))
+                        put("content", encryptedBlob)
                     })
                 })
             }
             val pushReq = Request.Builder()
-                .url("https://api.github.com/gists/${BuildConfig.ARCHIVE_GIST_ID}")
-                .addHeader("Authorization", "Bearer ${BuildConfig.GIST_TOKEN}")
+                .url("https://api.github.com/gists/${CryptoHelper.getSecret(BuildConfig.ARCHIVE_GIST_ID)}")
+                .addHeader("Authorization", "Bearer ${CryptoHelper.getSecret(BuildConfig.GIST_TOKEN)}")
                 .patch(payload.toString().toRequestBody("application/json".toMediaType()))
                 .build()
 
-            httpClient.newCall(pushReq).execute().use { response ->
-                response.isSuccessful
-            }
+            httpClient.newCall(pushReq).execute().use { response -> response.isSuccessful }
         } catch (e: Exception) {
             e.printStackTrace()
-            false // Archiving failed, tell the main system to abort deletion!
+            false 
         }
     }
 }
