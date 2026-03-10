@@ -101,8 +101,8 @@ object GroupUIHelper {
             val filtered = allGroups.filter { it.contains(query, ignoreCase = true) }
             
             filtered.forEach { group ->
-                // FIX: Variable only declared here inside the loop
-                val unread = unreadCounts[group] ?: 0
+                // ONLY declare 'unread' HERE inside the loop
+                val unread = unreadCounts[group] ?: 0 
                 
                 val groupContainer = LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
