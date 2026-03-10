@@ -18,8 +18,8 @@ object GroupUIHelper {
         unreadCounts: Map<String, Int>, 
         onGroupSelected: (String) -> Unit,
         onGroupCreated: (String) -> Unit,
-        onGroupRename: (String, String) -> Unit, // <--- ADD THIS
-        onGroupDelete: (String) -> Unit          // <--- ADD THIS
+        onGroupRename: (String, String) -> Unit,
+        onGroupDelete: (String) -> Unit
     ): LinearLayout {
         val mainLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -28,7 +28,6 @@ object GroupUIHelper {
             setPadding(40, 80, 40, 40)
         }
 
-        // --- NEW: Header Row with Title & Search Icon ---
         val headerRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -58,7 +57,6 @@ object GroupUIHelper {
         headerRow.addView(searchBtn)
         mainLayout.addView(headerRow)
 
-        // --- NEW: Hidden Search Bar Row ---
         val searchBarRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -90,23 +88,22 @@ object GroupUIHelper {
         searchBarRow.addView(closeSearchBtn)
         mainLayout.addView(searchBarRow)
 
-        // Scrollable List Container
         val scrollView = ScrollView(context).apply {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
         }
         val listLayout = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
 
-        // Extract Groups
         val allGroups = chatHistory.map { it.groupName ?: "Personal Chat" }.distinct().toMutableList()
         if (!allGroups.contains("Personal Chat")) allGroups.add(0, "Personal Chat")
 
-        // --- NEW: Dynamic Render Function ---
-        // --- NEW: Dynamic Render Function ---
         fun renderList(query: String) {
             listLayout.removeAllViews()
             val filtered = allGroups.filter { it.contains(query, ignoreCase = true) }
+            
             filtered.forEach { group ->
+                // FIX: Variable only declared here inside the loop
                 val unread = unreadCounts[group] ?: 0
+                
                 val groupContainer = LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
@@ -121,8 +118,8 @@ object GroupUIHelper {
                     isClickable = true
                     isFocusable = true
                     setOnClickListener { onGroupSelected(group) }
-                    // --- NEW: LONG PRESS TO RENAME OR DELETE ---
-                    if (group != "Personal Chat") { // Protect the main chat from deletion
+                    
+                    if (group != "Personal Chat") {
                         setOnLongClickListener {
                             val optionsDialog = AlertDialog.Builder(context).create()
                             val optionsLayout = LinearLayout(context).apply {
@@ -142,7 +139,6 @@ object GroupUIHelper {
                             }
                             optionsLayout.addView(titleText)
                             
-                            // Rename Button
                             val renameBtn = TextView(context).apply {
                                 text = "✏️ Rename Group"
                                 textSize = 18f
@@ -165,7 +161,6 @@ object GroupUIHelper {
                             }
                             optionsLayout.addView(renameBtn)
                             
-                            // Delete Button
                             val deleteBtn = TextView(context).apply {
                                 text = "🗑️ Delete Group"
                                 textSize = 18f
@@ -181,8 +176,7 @@ object GroupUIHelper {
                             optionsDialog.setView(optionsLayout)
                             optionsDialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
                             optionsDialog.show()
-                            
-                            true // Consume the long click
+                            true 
                         }
                     }
                 }
@@ -195,8 +189,6 @@ object GroupUIHelper {
                 }
                 groupContainer.addView(groupNameText)
 
-                // --- NEW: UNREAD BADGE LOGIC ---
-                val unread = unreadCounts[group] ?: 0
                 if (unread > 0) {
                     val badge = TextView(context).apply {
                         text = unread.toString()
@@ -205,9 +197,9 @@ object GroupUIHelper {
                         setTypeface(null, Typeface.BOLD)
                         gravity = Gravity.CENTER
                         setPadding(20, 6, 20, 6)
-                        minWidth = 75 // Ensures it looks circular even with 1 digit
+                        minWidth = 75 
                         background = GradientDrawable().apply {
-                            setColor(Color.parseColor("#0B7065")) // Dark Green Circle
+                            setColor(Color.parseColor("#0B7065"))
                             cornerRadius = 50f
                         }
                     }
@@ -218,12 +210,10 @@ object GroupUIHelper {
             }
         }
 
-        // Initial render
         renderList("")
         scrollView.addView(listLayout)
         mainLayout.addView(scrollView)
 
-        // --- NEW: Search Interactions ---
         searchBtn.setOnClickListener {
             headerRow.visibility = View.GONE
             searchBarRow.visibility = View.VISIBLE
@@ -231,7 +221,7 @@ object GroupUIHelper {
         }
 
         closeSearchBtn.setOnClickListener {
-            searchInput.text.clear() // Will trigger TextWatcher to reset list
+            searchInput.text.clear()
             searchBarRow.visibility = View.GONE
             headerRow.visibility = View.VISIBLE
         }
@@ -244,7 +234,6 @@ object GroupUIHelper {
             }
         })
 
-        // "+ Create a Group" Button
         val addBtn = Button(context).apply {
             text = "➕ Create a Group"
             textSize = 16f
