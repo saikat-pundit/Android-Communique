@@ -47,3 +47,13 @@ jobs:
       with:
         name: communique
         path: android-client/app/build/outputs/apk/debug/communique.apk
+
+    - name: Publish to GitHub Releases
+      uses: softprops/action-gh-release@v1
+      with:
+          tag_name: latest
+          name: Latest App Build
+          files: app/build/outputs/apk/debug/communique.apk
+          prerelease: false
+      env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
