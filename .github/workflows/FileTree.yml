@@ -1,0 +1,32 @@
+name: Generate File Tree Artifact
+
+on:
+  workflow_dispatch: # Allows you to run this manually from the Actions tab
+
+jobs:
+  generate-tree:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Tree utility
+        run: sudo apt-get install -y tree
+
+      - name: Generate File Tree
+        run: |
+          # Generate the tree, excluding noisy folders like .git, gradle caches, and build directories
+          # -a includes hidden files
+          # -I specifies patterns to ignore
+          tree -a -I '.git|.gradle|.idea|build|app/build|node_modules' > repository-tree.txt
+          
+          # Print the first 20 lines to the action logs so you can preview it
+          echo "Preview of the file tree:"
+          head -n 20 repository-tree.txt
+
+      - name: Upload Tree Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Project-File-Tree
+          path: repository-tree.txt
+          retention-days: 14 # Artifact will be kept for 14 days before auto-deleting
