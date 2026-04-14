@@ -18,7 +18,7 @@
         android:roundIcon="@drawable/logo"
         android:label="Communiqué"
         android:supportsRtl="true"
-        android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+        android:theme="@style/Theme.MaterialComponents.Light.NoActionBar">
         
         <activity
             android:name=".MainActivity"
