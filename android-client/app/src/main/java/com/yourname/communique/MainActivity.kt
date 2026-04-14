@@ -83,6 +83,7 @@ class MainActivity : AppCompatActivity() {
     private var replyingToDevice: String? = null
     private var replyingToText: String? = null
     private var highestSeenTimestamp = 0L
+    private var signalingSocket: okhttp3.WebSocket? = null
     private lateinit var chatMessageContainer: LinearLayout
     private lateinit var chatScrollView: ScrollView
     private lateinit var userCountText: TextView
@@ -203,12 +204,26 @@ class MainActivity : AppCompatActivity() {
                         chatHistory = chatHistory,
                         currentDeviceName = currentDeviceName
                     ) { targetUser, isVideo ->
+                        
+                        val callMsg = JSONObject().apply {
+                            put("type", "call_request")
+                            put("target", targetUser)
+                            put("caller", currentDeviceName)
+                            put("isVideo", isVideo)
+                        }
+                        signalingSocket?.send(callMsg.toString())
+
                         CallUIHelper.showOutgoingCallScreen(
                             context = this@MainActivity,
                             targetUser = targetUser,
                             isVideo = isVideo
                         ) {
-                            
+                             val cancelMsg = JSONObject().apply {
+                                 put("type", "call_response")
+                                 put("target", targetUser)
+                                 put("accepted", false)
+                             }
+                             signalingSocket?.send(cancelMsg.toString())
                         }
                     }
                 } else {
@@ -240,6 +255,7 @@ class MainActivity : AppCompatActivity() {
                     chatLayout.alpha = 1f 
                     isPolling = true
                     startPollingGist()
+                    connectSignalingServer()
                     showGroupScreen()
                 }.start()
             } else {
@@ -754,6 +770,65 @@ class MainActivity : AppCompatActivity() {
         if (currentSearchQuery.isEmpty() && chatMessageContainer.childCount > 0) {
             chatScrollView.post { chatScrollView.smoothScrollTo(0, chatMessageContainer.bottom) }
         }
+    }
+
+    private fun connectSignalingServer() {
+        val request = Request.Builder().url("wss://communique-signaling-server.onrender.com").build()
+        signalingSocket = httpClient.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                val registerMsg = JSONObject().apply {
+                    put("type", "register")
+                    put("device", currentDeviceName)
+                }
+                webSocket.send(registerMsg.toString())
+            }
+
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                try {
+                    val json = JSONObject(text)
+                    when (json.getString("type")) {
+                        "call_request" -> {
+                            val caller = json.getString("caller")
+                            val isVideo = json.getBoolean("isVideo")
+                            CoroutineScope(Dispatchers.Main).launch {
+                                CallUIHelper.showIncomingCallScreen(
+                                    context = this@MainActivity,
+                                    callerName = caller,
+                                    isVideo = isVideo,
+                                    onAccept = {
+                                        val acceptMsg = JSONObject().apply {
+                                            put("type", "call_response")
+                                            put("target", caller)
+                                            put("accepted", true)
+                                        }
+                                        signalingSocket?.send(acceptMsg.toString())
+                                        Toast.makeText(this@MainActivity, "Connecting WebRTC Streams...", Toast.LENGTH_LONG).show()
+                                    },
+                                    onDecline = {
+                                        val declineMsg = JSONObject().apply {
+                                            put("type", "call_response")
+                                            put("target", caller)
+                                            put("accepted", false)
+                                        }
+                                        signalingSocket?.send(declineMsg.toString())
+                                    }
+                                )
+                            }
+                        }
+                        "call_response" -> {
+                            val accepted = json.getBoolean("accepted")
+                            CoroutineScope(Dispatchers.Main).launch {
+                                if (accepted) {
+                                    Toast.makeText(this@MainActivity, "Call Accepted! Connecting...", Toast.LENGTH_LONG).show()
+                                } else {
+                                    Toast.makeText(this@MainActivity, "Call Declined or Ended", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) { e.printStackTrace() }
+            }
+        })
     }
 }
 
