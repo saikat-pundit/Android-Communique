@@ -106,15 +106,17 @@ class MainActivity : AppCompatActivity() {
         sharedPrefs = getSharedPreferences("CommuniqueCache", Context.MODE_PRIVATE)
         
         // INSTANT LOAD: Read from cache before the network even starts!
-        val cachedJson = sharedPrefs.getString("chat_ledger_cache", null)
-        if (cachedJson != null) {
-            try {
-                val type = object : TypeToken<List<ChatMessage>>() {}.type
+        try {
+            val cacheFile = java.io.File(filesDir, "chat_ledger_cache.json")
+            if (cacheFile.exists()) {
+                val cachedJson = cacheFile.readText()
+                val type = object : com.google.gson.reflect.TypeToken<List<ChatMessage>>() {}.type
                 val cachedList: List<ChatMessage> = gson.fromJson(cachedJson, type)
                 chatHistory.clear()
                 chatHistory.addAll(cachedList)
-            } catch (e: Exception) { e.printStackTrace() }
-        }
+                highestSeenTimestamp = chatHistory.maxOfOrNull { it.timestamp } ?: 0L
+            }
+        } catch (e: Exception) { e.printStackTrace() }
         // Initialize MediaManager
         mediaManager = MediaManager(this, httpClient)
 
@@ -254,9 +256,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private fun saveCacheAndReadState() {
-        // Save the whole chat history to phone memory
-        sharedPrefs.edit().putString("chat_ledger_cache", gson.toJson(chatHistory)).apply()
-        // If we are currently in a group, update its read count so we don't show badges for messages we just saw/sent
+        try {
+            val cacheFile = java.io.File(filesDir, "chat_ledger_cache.json")
+            cacheFile.writeText(gson.toJson(chatHistory))
+        } catch (e: Exception) { e.printStackTrace() }
         currentGroupName?.let { markGroupAsRead(it) }
     }
 
@@ -394,9 +397,9 @@ class MainActivity : AppCompatActivity() {
             }
             
             chatHistory.add(newMessage)
+            highestSeenTimestamp = newMessage.timestamp
             saveCacheAndReadState()
-            networkHelper.pushGistUpdate(chatHistory)
-            
+            networkHelper.pushGistUpdate(chatHistory)            
             CoroutineScope(Dispatchers.Main).launch { updateChatUI() }
         }
     }
@@ -625,19 +628,22 @@ class MainActivity : AppCompatActivity() {
                 
                 // FIX: Check if lists are DIFFERENT (handles deletions!), not just larger
                 if (fetchedHistory != null && fetchedHistory != chatHistory) {
-                    val isNewMessageAdded = fetchedHistory.size > chatHistory.size
                     val lastMessage = fetchedHistory.lastOrNull()
                     val isMe = lastMessage?.device == currentDeviceName
+                    val isGenuinelyNew = lastMessage != null && lastMessage.timestamp > highestSeenTimestamp
 
                     chatHistory.clear()
                     chatHistory.addAll(fetchedHistory)
                     saveCacheAndReadState()
                     
+                    if (lastMessage != null && lastMessage.timestamp > highestSeenTimestamp) {
+                        highestSeenTimestamp = lastMessage.timestamp
+                    }
+                   
                     CoroutineScope(Dispatchers.Main).launch {
                         if (currentGroupName == null) {
-                            showGroupScreen() // Refresh the group list
+                            showGroupScreen()
                         } else {
-                            // If you are inside a group that someone else just deleted, kick back to home!
                             val groupStillExists = chatHistory.any { (it.groupName ?: "Personal Chat") == currentGroupName } || currentGroupName == "Personal Chat"
                             if (!groupStillExists) {
                                 currentGroupName = null
@@ -649,15 +655,18 @@ class MainActivity : AppCompatActivity() {
                                 updateUserCount()
                             }
                         }
-                        
-                        // Only play sound if a NEW message was ADDED (not for deletions!)
-                        if (!isFirstLoad && !isMe && isNewMessageAdded && lastMessage != null) {
+                       
+                        if (!isFirstLoad && !isMe && isGenuinelyNew && lastMessage != null) {
                             playNotificationSound()
                             showNotification(lastMessage.device, CryptoHelper.decrypt(lastMessage.message))
                         }
                         isFirstLoad = false
                     }
                 } else if (isFirstLoad && fetchedHistory != null) {
+                    val lastMsg = fetchedHistory.lastOrNull()
+                    if (lastMsg != null && lastMsg.timestamp > highestSeenTimestamp) {
+                        highestSeenTimestamp = lastMsg.timestamp
+                    }
                     isFirstLoad = false
                     chatHistory.clear()
                     chatHistory.addAll(fetchedHistory)
