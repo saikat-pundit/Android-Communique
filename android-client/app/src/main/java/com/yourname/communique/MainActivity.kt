@@ -165,7 +165,7 @@ class MainActivity : AppCompatActivity() {
         addContentView(groupOverlay, groupOverlay.layoutParams)
 
         val backButton = ImageView(this).apply {
-            setImageDrawable(ContextCompat.getDrawable(this@MainActivity, R.drawable.ic_arrow_back))
+            setImageDrawable(androidx.core.content.ContextCompat.getDrawable(this@MainActivity, R.drawable.ic_arrow_back))
             
             layoutParams = LinearLayout.LayoutParams(90, 90).apply {
                 setMargins(0, 0, 32, 0)
@@ -182,7 +182,7 @@ class MainActivity : AppCompatActivity() {
         (userCountText.parent as LinearLayout).addView(backButton, 0)
 
         val callButton = ImageView(this).apply {
-            setImageDrawable(ContextCompat.getDrawable(this@MainActivity, R.drawable.ic_call))
+            setImageDrawable(androidx.core.content.ContextCompat.getDrawable(this@MainActivity, R.drawable.ic_call))
             
             layoutParams = LinearLayout.LayoutParams(90, 90).apply {
                 setMargins(0, 0, 24, 0)
