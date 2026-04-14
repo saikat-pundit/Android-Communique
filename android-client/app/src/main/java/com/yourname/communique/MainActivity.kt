@@ -79,6 +79,7 @@ class MainActivity : AppCompatActivity() {
     private var currentSearchIndex = -1
     private var replyingToDevice: String? = null
     private var replyingToText: String? = null
+    private var highestSeenTimestamp = 0L
     private lateinit var chatMessageContainer: LinearLayout
     private lateinit var chatScrollView: ScrollView
     private lateinit var userCountText: TextView
