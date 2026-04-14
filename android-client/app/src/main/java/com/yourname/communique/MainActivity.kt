@@ -188,7 +188,9 @@ class MainActivity : AppCompatActivity() {
                 setMargins(0, 0, 24, 0)
             }
             setPadding(16, 16, 16, 16)
-            setBackgroundResource(android.R.attr.selectableItemBackgroundBorderless)
+            val typedValue = android.util.TypedValue()
+            this@MainActivity.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, typedValue, true)
+            setBackgroundResource(typedValue.resourceId)
             
             setOnClickListener {
                 if (currentGroupName == "Personal Chat" || currentGroupName == null) {
