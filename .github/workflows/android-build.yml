@@ -54,7 +54,7 @@ jobs:
       with:
           tag_name: latest
           name: Latest App Build
-          files: app/build/outputs/apk/debug/communique.apk
+          files: android-client/app/build/outputs/apk/debug/communique.apk
           prerelease: false
       env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
