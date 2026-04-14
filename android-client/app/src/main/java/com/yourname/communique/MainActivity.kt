@@ -162,23 +162,38 @@ class MainActivity : AppCompatActivity() {
         }
         addContentView(groupOverlay, groupOverlay.layoutParams)
 
-        val backButton = ImageView(this).apply {
-            setImageResource(R.drawable.ic_arrow_back) // This calls your new Material XML icon!
+        val callButton = ImageView(this).apply {
+            setImageResource(R.drawable.ic_call)
             
-            // Set a perfect touch target size (approx 90x90 pixels)
             layoutParams = LinearLayout.LayoutParams(90, 90).apply {
-                setMargins(0, 0, 32, 0) 
+                setMargins(0, 0, 24, 0)
             }
-            setPadding(12, 12, 12, 12)
+            setPadding(16, 16, 16, 16)
+            setBackgroundResource(android.R.attr.selectableItemBackgroundBorderless)
             
             setOnClickListener {
-                currentGroupName?.let { markGroupAsRead(it) }
-                currentGroupName = null
-                chatLayout.visibility = View.GONE
-                showGroupScreen()
+                if (currentGroupName == "Personal Chat" || currentGroupName == null) {
+                    CallUIHelper.showCallSelectionDialog(
+                        context = this@MainActivity,
+                        chatHistory = chatHistory,
+                        currentDeviceName = currentDeviceName
+                    ) { targetUser, isVideo ->
+                        // This triggers when the user selects someone to call
+                        CallUIHelper.showOutgoingCallScreen(
+                            context = this@MainActivity,
+                            targetUser = targetUser,
+                            isVideo = isVideo
+                        ) {
+                            // Logic for when the user cancels the call or it times out
+                        }
+                    }
+                } else {
+                    Toast.makeText(this@MainActivity, "Calling is only available in Personal Chat", Toast.LENGTH_SHORT).show()
+                }
             }
         }
-        (userCountText.parent as LinearLayout).addView(backButton, 0) // Injects into Chat Header
+        // Insert it right before the Search icon (index 2 because backButton is 0 and userCount is 1)
+        (userCountText.parent as LinearLayout).addView(callButton, 2) // Injects into Chat Header
         // ------------------------------------------------
         detectedDeviceText.text = "Device Name: $currentDeviceName"
 
