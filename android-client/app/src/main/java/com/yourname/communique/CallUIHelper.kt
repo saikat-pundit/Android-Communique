@@ -6,11 +6,11 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
-import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import kotlinx.coroutines.*
 
 object CallUIHelper {
@@ -163,7 +163,7 @@ object CallUIHelper {
         decShape.setColor(Color.RED)
         decShape.cornerRadius = 50f
         declineBtn.background = decShape
-        val decParams = LinearLayout.LayoutParams(wrapContent, wrapContent)
+        val decParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         decParams.setMargins(0, 0, 40, 0)
         declineBtn.layoutParams = decParams
         declineBtn.setOnClickListener {
@@ -198,6 +198,4 @@ object CallUIHelper {
             }
         }
     }
-    
-    private val wrapContent = LinearLayout.LayoutParams.WRAP_CONTENT
 }
